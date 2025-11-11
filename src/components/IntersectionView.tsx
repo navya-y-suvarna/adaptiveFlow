@@ -1,79 +1,101 @@
 import { TrafficLight } from './TrafficLight';
 import { Car, Ambulance as AmbulanceIcon } from 'lucide-react';
+import { motion } from 'framer-motion';
 
-interface IntersectionViewProps {
+interface Props {
   currentSignal: 'north' | 'south' | 'east' | 'west';
   timer: number;
-  trafficDensity: {
-    north: number;
-    south: number;
-    east: number;
-    west: number;
-  };
+  trafficDensity: Record<'north' | 'south' | 'east' | 'west', number>;
   ambulanceDirection?: 'north' | 'south' | 'east' | 'west';
   reason?: string;
 }
 
-export function IntersectionView({ currentSignal, timer, trafficDensity, ambulanceDirection, reason }: IntersectionViewProps) {
+export function IntersectionView({
+  currentSignal,
+  timer,
+  trafficDensity,
+  ambulanceDirection,
+  reason,
+}: Props) {
+  const roadColor = 'bg-gray-800';
+  const borderLine = 'border-yellow-400 border-4 rounded-2xl';
+
+  // Animation directions (moving toward the center)
+  const vehicleVariants = {
+    north: { y: [-100, 0], opacity: [0, 1] }, // move down
+    south: { y: [100, 0], opacity: [0, 1] },  // move up
+    east: { x: [100, 0], opacity: [0, 1] },   // move left
+    west: { x: [-100, 0], opacity: [0, 1] },  // move right
+  };
+
   const renderVehicles = (direction: 'north' | 'south' | 'east' | 'west', count: number) => {
-    const positions = {
-      north: 'top-20 left-1/2 -translate-x-1/2 flex-col space-y-1',
-      south: 'bottom-20 left-1/2 -translate-x-1/2 flex-col-reverse space-y-reverse space-y-1',
-      east: 'right-20 top-1/2 -translate-y-1/2 flex-row-reverse space-x-reverse space-x-1',
-      west: 'left-20 top-1/2 -translate-y-1/2 flex-row space-x-1',
+    const lanePositions: Record<string, string> = {
+      north: 'absolute top-0 left-1/2 -translate-x-1/2 flex flex-col items-center',
+      south: 'absolute bottom-0 left-1/2 -translate-x-1/2 flex flex-col-reverse items-center',
+      east: 'absolute right-0 top-1/2 -translate-y-1/2 flex flex-row-reverse',
+      west: 'absolute left-0 top-1/2 -translate-y-1/2 flex flex-row',
     };
 
-    const hasAmbulance = ambulanceDirection === direction;
+    const vehicles = Array.from({ length: Math.min(count, 5) });
 
     return (
-      <div className={`absolute ${positions[direction]} flex`}>
-        {hasAmbulance && (
-          <div className="animate-bounce">
-            <AmbulanceIcon className="w-8 h-8 text-red-500 fill-red-500 drop-shadow-lg" />
-          </div>
-        )}
-        {Array.from({ length: Math.min(count, 8) }).map((_, i) => (
-          <div key={i} className="animate-pulse">
-            <Car className="w-5 h-5 text-blue-500 fill-blue-500" />
-          </div>
+      <div className={lanePositions[direction]}>
+        {vehicles.map((_, i) => (
+          <motion.div
+            key={i}
+            variants={vehicleVariants}
+            animate={direction}
+            transition={{ duration: 2, delay: i * 0.3, repeat: Infinity }}
+            className="mb-2"
+          >
+            <Car className="w-6 h-6 text-blue-400 fill-blue-500 drop-shadow-lg" />
+          </motion.div>
         ))}
-        {count > 8 && (
-          <span className="text-white text-xs bg-gray-800 px-2 py-1 rounded">+{count - 8}</span>
+
+        {/* Animated Ambulance */}
+        {ambulanceDirection === direction && (
+          <motion.div
+            variants={vehicleVariants}
+            animate={direction}
+            transition={{ duration: 1.8, repeat: Infinity }}
+            className="relative mt-2"
+          >
+            <AmbulanceIcon className="w-10 h-10 text-red-500 drop-shadow-[0_0_10px_#ff0000] animate-pulse" />
+            <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-ping" />
+          </motion.div>
         )}
       </div>
     );
   };
 
   return (
-    <div className="relative w-full max-w-3xl aspect-square bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl shadow-2xl overflow-hidden border-4 border-gray-700">
+    <div className={`relative w-full max-w-3xl aspect-square mx-auto ${roadColor} ${borderLine} shadow-2xl`}>
+      {/* Center label */}
       <div className="absolute inset-0 flex items-center justify-center">
-        <div className="relative w-56 h-56">
-          <div className="absolute inset-0 bg-gradient-to-br from-gray-700 to-gray-800 border-4 border-yellow-400 shadow-xl">
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center">
-                <div className="text-yellow-400 font-bold text-lg drop-shadow-lg">MAIN JUNCTION</div>
-                <div className="text-gray-300 text-xs mt-1">Mangaluru</div>
-              </div>
-            </div>
+        <div className="text-center">
+          <div className="text-yellow-400 font-bold text-xl">MAIN JUNCTION</div>
+          <div className="text-gray-300 text-sm">Mangaluru</div>
+          <div className="text-gray-400 text-xs mt-1">
+            Active Signal: <span className="text-green-400 font-semibold">{currentSignal.toUpperCase()}</span>
           </div>
-
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-20 h-full bg-gradient-to-b from-gray-600 to-gray-700 -z-10 border-x-2 border-yellow-500/30" />
-          <div className="absolute left-0 top-1/2 -translate-y-1/2 h-20 w-full bg-gradient-to-r from-gray-600 to-gray-700 -z-10 border-y-2 border-yellow-500/30" />
         </div>
       </div>
 
+      {/* Lights */}
       <TrafficLight direction="north" isActive={currentSignal === 'north'} timer={timer} reason={reason} />
       <TrafficLight direction="south" isActive={currentSignal === 'south'} timer={timer} reason={reason} />
       <TrafficLight direction="east" isActive={currentSignal === 'east'} timer={timer} reason={reason} />
       <TrafficLight direction="west" isActive={currentSignal === 'west'} timer={timer} reason={reason} />
 
+      {/* Vehicles & Ambulance */}
       {renderVehicles('north', trafficDensity.north)}
       {renderVehicles('south', trafficDensity.south)}
       {renderVehicles('east', trafficDensity.east)}
       {renderVehicles('west', trafficDensity.west)}
 
+      {/* Emergency Label */}
       {ambulanceDirection && (
-        <div className="absolute top-2 right-2 bg-red-600 text-white px-3 py-2 rounded-lg shadow-lg animate-pulse flex items-center gap-2">
+        <div className="absolute top-2 right-2 bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg animate-pulse flex items-center gap-2">
           <AmbulanceIcon className="w-5 h-5" />
           <span className="font-semibold text-sm">EMERGENCY: {ambulanceDirection.toUpperCase()}</span>
         </div>
