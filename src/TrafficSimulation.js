@@ -1,11 +1,49 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Play, Pause, RotateCcw, Truck, Car, Clock, Activity } from 'lucide-react';
+import React, { useState, useEffect, useRef } from "react";
+import {
+  Play,
+  Pause,
+  RotateCcw,
+  Truck,
+  Car,
+  Clock,
+  Activity,
+} from "lucide-react";
+
+const normalGreenTime = 20;
+const emergencyGreenTime = 35;
+const MAX_LOG_ITEMS = 80;
+
+// Decide which axis should be green next
+function decideNextGreen(
+  vehicles,
+  emergencyActive,
+  emergencyDirection,
+  currentGreen
+) {
+  // 1. Emergency always has first priority
+  if (emergencyActive && emergencyDirection) {
+    if (emergencyDirection === "N" || emergencyDirection === "S") return "NS";
+    return "EW";
+  }
+
+  // 2. Otherwise, pick axis with more vehicles
+  let nsCount = 0;
+  let ewCount = 0;
+
+  vehicles.forEach((v) => {
+    if (v.direction === "N" || v.direction === "S") nsCount++;
+    else if (v.direction === "E" || v.direction === "W") ewCount++;
+  });
+
+  if (nsCount === ewCount) return currentGreen; // avoid unnecessary flicker
+  return nsCount > ewCount ? "NS" : "EW";
+}
 
 const TrafficSimulation = () => {
   const [isRunning, setIsRunning] = useState(false);
   const [time, setTime] = useState(0);
-  const [greenLight, setGreenLight] = useState('NS');
-  const [timer, setTimer] = useState(20);
+  const [greenLight, setGreenLight] = useState("NS");
+  const [timer, setTimer] = useState(normalGreenTime);
   const [emergencyActive, setEmergencyActive] = useState(false);
   const [emergencyDirection, setEmergencyDirection] = useState(null);
   const [vehicles, setVehicles] = useState([]);
@@ -13,40 +51,36 @@ const TrafficSimulation = () => {
     totalVehicles: 0,
     avgWaitTime: 0,
     emergencyResponses: 0,
-    avgEmergencyTime: 2.3
+    avgEmergencyTime: 2.3,
   });
   const [eventLog, setEventLog] = useState([]);
   const [laneCounts, setLaneCounts] = useState({ N: 0, S: 0, E: 0, W: 0 });
-  const [ambulanceDirection, setAmbulanceDirection] = useState('N');
+  const [ambulanceDirection, setAmbulanceDirection] = useState("N");
 
   const animationRef = useRef(null);
   const lastTimeRef = useRef(0);
   const vehiclesRef = useRef([]);
-  const timerRef = useRef(20);
-
-  const normalGreenTime = 20;
-  const emergencyGreenTime = 35;
-  const MAX_LOG_ITEMS = 80;
+  const timerRef = useRef(normalGreenTime);
 
   // --- EVENT LOG HELPERS -------------------------------------------------
 
-  const addEvent = (message, type = 'info') => {
-    const timestamp = new Date().toLocaleTimeString('en-IN', {
+  const addEvent = (message, type = "info") => {
+    const timestamp = new Date().toLocaleTimeString("en-IN", {
       hour12: false,
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
     });
 
-    setEventLog(prev => {
+    setEventLog((prev) => {
       const next = [
         {
           id: `${Date.now()}-${Math.random()}`,
           time: timestamp,
           message,
-          type
+          type,
         },
-        ...prev
+        ...prev,
       ];
       return next.slice(0, MAX_LOG_ITEMS);
     });
@@ -55,9 +89,15 @@ const TrafficSimulation = () => {
   // --- TIME FORMATTER ----------------------------------------------------
 
   const formatTime = (seconds) => {
-    const h = Math.floor(seconds / 3600).toString().padStart(2, '0');
-    const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0');
-    const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+    const h = Math.floor(seconds / 3600)
+      .toString()
+      .padStart(2, "0");
+    const m = Math.floor((seconds % 3600) / 60)
+      .toString()
+      .padStart(2, "0");
+    const s = Math.floor(seconds % 60)
+      .toString()
+      .padStart(2, "0");
     return `${h}:${m}:${s}`;
   };
 
@@ -65,9 +105,9 @@ const TrafficSimulation = () => {
 
   const createInitialVehicles = () => {
     const initial = [];
-    const directions = ['N', 'S', 'E', 'W'];
+    const directions = ["N", "S", "E", "W"];
 
-    directions.forEach(dir => {
+    directions.forEach((dir) => {
       for (let i = 0; i < 4; i++) {
         initial.push({
           id: `${dir}-init-${i}`,
@@ -76,7 +116,7 @@ const TrafficSimulation = () => {
           waiting: false,
           waitTime: 0,
           isEmergency: false,
-          speed: 1 // base speed (we’ll move them with a smaller factor)
+          speed: 1, // base speed
         });
       }
     });
@@ -87,40 +127,14 @@ const TrafficSimulation = () => {
     const initialVehicles = createInitialVehicles();
     setVehicles(initialVehicles);
     vehiclesRef.current = initialVehicles;
-    setStats(prev => ({
+    setStats((prev) => ({
       ...prev,
-      totalVehicles: initialVehicles.length
+      totalVehicles: initialVehicles.length,
     }));
-    addEvent('Traffic simulation initialized with starter vehicles.', 'system');
+    addEvent("Traffic simulation initialized with starter vehicles.", "system");
     timerRef.current = normalGreenTime;
     setTimer(normalGreenTime);
   }, []);
-
-  // --- DECIDE NEXT GREEN AXIS --------------------------------------------
-
-  const decideNextGreen = useCallback(() => {
-    // 1. Ambulance priority
-    if (emergencyActive && emergencyDirection) {
-      if (emergencyDirection === 'N' || emergencyDirection === 'S') {
-        return 'NS';
-      }
-      return 'EW';
-    }
-
-    // 2. Otherwise choose axis with more vehicles
-    const currentVehicles = vehiclesRef.current || [];
-    let nsCount = 0;
-    let ewCount = 0;
-
-    currentVehicles.forEach(v => {
-      if (v.direction === 'N' || v.direction === 'S') nsCount++;
-      else if (v.direction === 'E' || v.direction === 'W') ewCount++;
-    });
-
-    // If equal, keep current green to avoid flicker
-    if (nsCount === ewCount) return greenLight;
-    return nsCount > ewCount ? 'NS' : 'EW';
-  }, [emergencyActive, emergencyDirection, greenLight]);
 
   // --- AMBULANCE SPAWN ---------------------------------------------------
 
@@ -130,14 +144,14 @@ const TrafficSimulation = () => {
     const ambulance = {
       id: `AMB-${Date.now()}`,
       direction: dir,
-      position: 450,
+      position: 300, // closer so it's clearly visible
       waiting: false,
       waitTime: 0,
       isEmergency: true,
-      speed: 1.2 // a bit faster than normal
+      speed: 1.2, // slightly faster than normal
     };
 
-    setVehicles(prev => {
+    setVehicles((prev) => {
       const updated = [...prev, ambulance];
       vehiclesRef.current = updated;
       return updated;
@@ -146,27 +160,27 @@ const TrafficSimulation = () => {
     setEmergencyActive(true);
     setEmergencyDirection(dir);
 
-    // Set signal axis according to ambulance
-    if (dir === 'N' || dir === 'S') {
-      setGreenLight('NS');
+    // Immediately give green to ambulance axis
+    if (dir === "N" || dir === "S") {
+      setGreenLight("NS");
       addEvent(
         `🚨 Ambulance dispatched from ${dir} direction - NS signal override activated.`,
-        'emergency'
+        "emergency"
       );
     } else {
-      setGreenLight('EW');
+      setGreenLight("EW");
       addEvent(
         `🚨 Ambulance dispatched from ${dir} direction - EW signal override activated.`,
-        'emergency'
+        "emergency"
       );
     }
 
     timerRef.current = emergencyGreenTime;
     setTimer(emergencyGreenTime);
 
-    setStats(prev => ({
+    setStats((prev) => ({
       ...prev,
-      emergencyResponses: prev.emergencyResponses + 1
+      emergencyResponses: prev.emergencyResponses + 1,
     }));
   };
 
@@ -191,42 +205,27 @@ const TrafficSimulation = () => {
       const safeDelta = Math.min(deltaTime, 0.2);
 
       // Update global time
-      setTime(prev => prev + safeDelta);
+      setTime((prev) => prev + safeDelta);
 
-      // Update timer + maybe change lights
-      timerRef.current -= safeDelta;
-      if (timerRef.current <= 0) {
-        const newLight = decideNextGreen();
-        setGreenLight(newLight);
-        addEvent(
-          `Signal changed to ${
-            newLight === 'NS' ? 'North-South GREEN' : 'East-West GREEN'
-          }.`,
-          'signal'
-        );
-        timerRef.current = emergencyActive ? emergencyGreenTime : normalGreenTime;
-      }
-      setTimer(timerRef.current);
-
-      // Update vehicles
-      setVehicles(prevVehicles => {
+      // --- VEHICLE UPDATE ------------------------------------------------
+      setVehicles((prevVehicles) => {
         const updated = prevVehicles
-          .map(vehicle => {
+          .map((vehicle) => {
             const axisIsNS =
-              vehicle.direction === 'N' || vehicle.direction === 'S';
-            const canMoveOnAxis = greenLight === (axisIsNS ? 'NS' : 'EW');
+              vehicle.direction === "N" || vehicle.direction === "S";
+            const canMoveOnAxis = greenLight === (axisIsNS ? "NS" : "EW");
 
             let waiting = vehicle.waiting;
             let waitTime = vehicle.waitTime;
             let position = vehicle.position;
 
-            // Only move if green for that axis
+            // If red → entire lane waits (no movement)
             if (!canMoveOnAxis) {
               waiting = true;
               waitTime += safeDelta;
             } else {
               waiting = false;
-              // slowed-down speed compared to original (0.6 factor instead of 1.2)
+              // Slower movement for better visibility
               position = position - vehicle.speed * 0.6;
             }
 
@@ -239,69 +238,95 @@ const TrafficSimulation = () => {
               ...vehicle,
               position,
               waiting,
-              waitTime
+              waitTime,
             };
           })
           .filter(Boolean);
 
         // Lane-wise counts
         const counts = { N: 0, S: 0, E: 0, W: 0 };
-        updated.forEach(v => {
+        updated.forEach((v) => {
           counts[v.direction] = (counts[v.direction] || 0) + 1;
         });
         setLaneCounts(counts);
 
-        // Spawn normal vehicles occasionally
+        // Spawn normal vehicles occasionally (light random rate)
         if (Math.random() < 0.012) {
-          const directions = ['N', 'S', 'E', 'W'];
+          const directions = ["N", "S", "E", "W"];
           const dir = directions[Math.floor(Math.random() * directions.length)];
           updated.push({
             id: `${dir}-${Date.now()}`,
             direction: dir,
-            position: 450,
+            position: 300,
             waiting: false,
             waitTime: 0,
             isEmergency: false,
-            speed: 1
+            speed: 1,
           });
-          setStats(prev => ({
+          setStats((prev) => ({
             ...prev,
-            totalVehicles: prev.totalVehicles + 1
+            totalVehicles: prev.totalVehicles + 1,
           }));
-          addEvent(`New vehicle entered from ${dir} direction.`, 'traffic');
+          addEvent(`New vehicle entered from ${dir} direction.`, "traffic");
         }
 
         // Check emergency status
-        const emergencyVehicles = updated.filter(v => v.isEmergency);
+        const emergencyVehicles = updated.filter((v) => v.isEmergency);
         if (emergencyActive && emergencyVehicles.length === 0) {
           setEmergencyActive(false);
           setEmergencyDirection(null);
           addEvent(
-            '✓ Emergency vehicle cleared the intersection. Normal operation resumed.',
-            'success'
+            "✓ Emergency vehicle cleared the intersection. Normal operation resumed.",
+            "success"
           );
         }
 
         // Update average wait time
-        const waitingVehicles = updated.filter(v => v.waiting);
+        const waitingVehicles = updated.filter((v) => v.waiting);
         if (waitingVehicles.length > 0) {
           const avgWait =
             waitingVehicles.reduce((sum, v) => sum + v.waitTime, 0) /
             waitingVehicles.length;
-          setStats(prev => ({
+          setStats((prev) => ({
             ...prev,
-            avgWaitTime: avgWait
+            avgWaitTime: avgWait,
           }));
         } else {
-          setStats(prev => ({
+          setStats((prev) => ({
             ...prev,
-            avgWaitTime: 0
+            avgWaitTime: 0,
           }));
         }
 
         vehiclesRef.current = updated;
         return updated;
       });
+
+      // --- TIMER + SIGNAL UPDATE ----------------------------------------
+      timerRef.current -= safeDelta;
+      if (timerRef.current <= 0) {
+        const nextLight = decideNextGreen(
+          vehiclesRef.current,
+          emergencyActive,
+          emergencyDirection,
+          greenLight
+        );
+
+        if (nextLight !== greenLight) {
+          setGreenLight(nextLight);
+          addEvent(
+            `Signal changed to ${
+              nextLight === "NS" ? "North-South GREEN" : "East-West GREEN"
+            }.`,
+            "signal"
+          );
+        }
+
+        timerRef.current = emergencyActive
+          ? emergencyGreenTime
+          : normalGreenTime;
+      }
+      setTimer(timerRef.current);
 
       animationRef.current = requestAnimationFrame(animate);
     };
@@ -314,7 +339,7 @@ const TrafficSimulation = () => {
       }
       lastTimeRef.current = 0;
     };
-  }, [isRunning, greenLight, emergencyActive, decideNextGreen]);
+  }, [isRunning, greenLight, emergencyActive, emergencyDirection]);
 
   // --- RESET -------------------------------------------------------------
 
@@ -327,7 +352,7 @@ const TrafficSimulation = () => {
     setTime(0);
     timerRef.current = normalGreenTime;
     setTimer(normalGreenTime);
-    setGreenLight('NS');
+    setGreenLight("NS");
     setEmergencyActive(false);
     setEmergencyDirection(null);
     lastTimeRef.current = 0;
@@ -339,54 +364,55 @@ const TrafficSimulation = () => {
       totalVehicles: initialVehicles.length,
       avgWaitTime: 0,
       emergencyResponses: 0,
-      avgEmergencyTime: 2.3
+      avgEmergencyTime: 2.3,
     });
 
     setEventLog([]);
-    addEvent('System reset. All parameters restored to default.', 'system');
+    addEvent("System reset. All parameters restored to default.", "system");
     setLaneCounts({ N: 0, S: 0, E: 0, W: 0 });
   };
 
   // --- VEHICLE POSITIONING (ALIGNED TO ROADS) ----------------------------
 
   const getVehicleStyle = (vehicle) => {
-    const d = vehicle.position; // distance from center
+    const d = vehicle.position;
+    const laneOffset = 20; // move cars slightly off the divider
 
     switch (vehicle.direction) {
-      case 'N': // from top, moving down
+      case "N": // coming from top
         return {
-          left: '50%',
+          left: `calc(50% - ${laneOffset}px)`,
           top: `calc(50% - ${d}px)`,
-          transform: 'translate(-50%, -50%) rotate(0deg)'
+          transform: "translate(-50%, -50%) rotate(0deg)",
         };
-      case 'S': // from bottom, moving up
+      case "S": // coming from bottom
         return {
-          left: '50%',
+          left: `calc(50% + ${laneOffset}px)`,
           top: `calc(50% + ${d}px)`,
-          transform: 'translate(-50%, -50%) rotate(180deg)'
+          transform: "translate(-50%, -50%) rotate(180deg)",
         };
-      case 'E': // from right, moving left
+      case "E": // coming from right
         return {
           left: `calc(50% + ${d}px)`,
-          top: '50%',
-          transform: 'translate(-50%, -50%) rotate(90deg)'
+          top: `calc(50% + ${laneOffset}px)`,
+          transform: "translate(-50%, -50%) rotate(90deg)",
         };
-      case 'W': // from left, moving right
+      case "W": // coming from left
         return {
           left: `calc(50% - ${d}px)`,
-          top: '50%',
-          transform: 'translate(-50%, -50%) rotate(270deg)'
+          top: `calc(50% - ${laneOffset}px)`,
+          transform: "translate(-50%, -50%) rotate(270deg)",
         };
       default:
         return {
-          left: '50%',
-          top: '50%',
-          transform: 'translate(-50%, -50%)'
+          left: "50%",
+          top: "50%",
+          transform: "translate(-50%, -50%)",
         };
     }
   };
 
-  // --- JSX ---------------------------------------------------------------
+  // --- JSX (UI stays the same) ------------------------------------------
 
   return (
     <div className="w-full max-w-7xl mx-auto p-6 bg-gradient-to-br from-gray-900 to-gray-800 rounded-xl shadow-2xl">
@@ -407,11 +433,11 @@ const TrafficSimulation = () => {
           <div className="flex gap-3 mb-6 flex-wrap items-center">
             <button
               onClick={() => {
-                setIsRunning(prev => {
+                setIsRunning((prev) => {
                   const next = !prev;
                   addEvent(
-                    next ? 'Simulation started.' : 'Simulation paused.',
-                    'system'
+                    next ? "Simulation started." : "Simulation paused.",
+                    "system"
                   );
                   return next;
                 });
@@ -419,7 +445,7 @@ const TrafficSimulation = () => {
               className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-all"
             >
               {isRunning ? <Pause size={20} /> : <Play size={20} />}
-              {isRunning ? 'Pause' : 'Start'}
+              {isRunning ? "Pause" : "Start"}
             </button>
             <button
               onClick={reset}
@@ -485,26 +511,40 @@ const TrafficSimulation = () => {
 
           {/* Lane counts */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-            {['N', 'S', 'E', 'W'].map(dir => (
-              <div
-                key={dir}
-                className="bg-gray-800 p-3 rounded-lg border border-gray-700 text-center"
-              >
-                <div className="text-gray-400 text-xs mb-1">
-                  {dir === 'N'
-                    ? 'North Lane'
-                    : dir === 'S'
-                    ? 'South Lane'
-                    : dir === 'E'
-                    ? 'East Lane'
-                    : 'West Lane'}
+            {["N", "S", "E", "W"].map((dir) => {
+              const isGreen =
+                (greenLight === "NS" && (dir === "N" || dir === "S")) ||
+                (greenLight === "EW" && (dir === "E" || dir === "W"));
+
+              return (
+                <div
+                  key={dir}
+                  className={`p-3 rounded-lg border text-center transition-all duration-300 ${
+                    isGreen
+                      ? "bg-green-900 border-green-500 shadow-lg scale-105"
+                      : "bg-gray-800 border-gray-700"
+                  }`}
+                >
+                  <div className="text-gray-400 text-xs mb-1">
+                    {dir === "N"
+                      ? "North Lane"
+                      : dir === "S"
+                      ? "South Lane"
+                      : dir === "E"
+                      ? "East Lane"
+                      : "West Lane"}
+                  </div>
+                  <div
+                    className={`text-xl font-bold ${
+                      isGreen ? "text-green-300" : "text-white"
+                    }`}
+                  >
+                    {laneCounts[dir] || 0}
+                  </div>
+                  <div className="text-gray-500 text-xs">vehicles</div>
                 </div>
-                <div className="text-xl font-bold text-white">
-                  {laneCounts[dir] || 0}
-                </div>
-                <div className="text-gray-500 text-xs">vehicles</div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Emergency banner */}
@@ -528,7 +568,7 @@ const TrafficSimulation = () => {
           {/* Intersection visualization */}
           <div
             className="relative bg-gray-700 rounded-lg p-8 overflow-hidden mx-auto"
-            style={{ height: '600px', width: '600px' }}
+            style={{ height: "600px", width: "600px" }}
           >
             {/* Vertical road */}
             <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-20 h-full bg-gray-600">
@@ -547,24 +587,24 @@ const TrafficSimulation = () => {
             <div className="absolute top-32 left-1/2 transform -translate-x-1/2 flex flex-col gap-1 bg-gray-900 p-2 rounded">
               <div
                 className={`w-4 h-4 rounded-full ${
-                  greenLight === 'NS' ? 'bg-green-500' : 'bg-gray-700'
+                  greenLight === "NS" ? "bg-green-500" : "bg-gray-700"
                 }`}
               ></div>
               <div
                 className={`w-4 h-4 rounded-full ${
-                  greenLight === 'NS' ? 'bg-gray-700' : 'bg-red-500'
+                  greenLight === "NS" ? "bg-gray-700" : "bg-red-500"
                 }`}
               ></div>
             </div>
             <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2 flex flex-col gap-1 bg-gray-900 p-2 rounded">
               <div
                 className={`w-4 h-4 rounded-full ${
-                  greenLight === 'NS' ? 'bg-green-500' : 'bg-gray-700'
+                  greenLight === "NS" ? "bg-green-500" : "bg-gray-700"
                 }`}
               ></div>
               <div
                 className={`w-4 h-4 rounded-full ${
-                  greenLight === 'NS' ? 'bg-gray-700' : 'bg-red-500'
+                  greenLight === "NS" ? "bg-gray-700" : "bg-red-500"
                 }`}
               ></div>
             </div>
@@ -573,24 +613,24 @@ const TrafficSimulation = () => {
             <div className="absolute right-32 top-1/2 transform -translate-y-1/2 flex gap-1 bg-gray-900 p-2 rounded">
               <div
                 className={`w-4 h-4 rounded-full ${
-                  greenLight === 'EW' ? 'bg-green-500' : 'bg-gray-700'
+                  greenLight === "EW" ? "bg-green-500" : "bg-gray-700"
                 }`}
               ></div>
               <div
                 className={`w-4 h-4 rounded-full ${
-                  greenLight === 'EW' ? 'bg-gray-700' : 'bg-red-500'
+                  greenLight === "EW" ? "bg-gray-700" : "bg-red-500"
                 }`}
               ></div>
             </div>
             <div className="absolute left-32 top-1/2 transform -translate-y-1/2 flex gap-1 bg-gray-900 p-2 rounded">
               <div
                 className={`w-4 h-4 rounded-full ${
-                  greenLight === 'EW' ? 'bg-green-500' : 'bg-gray-700'
+                  greenLight === "EW" ? "bg-green-500" : "bg-gray-700"
                 }`}
               ></div>
               <div
                 className={`w-4 h-4 rounded-full ${
-                  greenLight === 'EW' ? 'bg-gray-700' : 'bg-red-500'
+                  greenLight === "EW" ? "bg-gray-700" : "bg-red-500"
                 }`}
               ></div>
             </div>
@@ -599,38 +639,36 @@ const TrafficSimulation = () => {
             <div className="absolute top-4 left-4 bg-gray-900 px-4 py-2 rounded-lg border border-gray-600">
               <div className="flex items-center gap-2 text-white">
                 <Clock size={16} />
-                <span className="font-mono text-lg">
-                  {Math.ceil(timer)}s
-                </span>
+                <span className="font-mono text-lg">{Math.ceil(timer)}s</span>
               </div>
               <div className="text-xs text-gray-400 mt-1">
-                {greenLight === 'NS' ? 'N-S Green' : 'E-W Green'}
+                {greenLight === "NS" ? "N-S Green" : "E-W Green"}
               </div>
             </div>
 
             {/* Vehicles */}
-            {vehicles.map(vehicle => {
+            {vehicles.map((vehicle) => {
               const style = getVehicleStyle(vehicle);
               return (
                 <div
                   key={vehicle.id}
-                  className="absolute transition-all duration-100"
+                  className="absolute car-animation transition-all duration-100"
                   style={style}
                 >
                   {vehicle.isEmergency ? (
                     <Truck
-                      className="text-red-500 animate-pulse"
-                      size={24}
+                      className="text-red-500 animate-pulse drop-shadow-[0_0_12px_rgba(239,68,68,0.8)]"
+                      size={36}
                       fill="white"
                     />
                   ) : (
                     <Car
-                      className={
+                      className={`${
                         vehicle.waiting
-                          ? 'text-purple-400'
-                          : 'text-blue-400'
-                      }
-                      size={20}
+                          ? "text-purple-400 drop-shadow-[0_0_8px_rgba(168,85,247,0.7)]"
+                          : "text-blue-400 drop-shadow-[0_0_8px_rgba(96,165,250,0.7)]"
+                      }`}
+                      size={30}
                     />
                   )}
                 </div>
@@ -691,32 +729,32 @@ const TrafficSimulation = () => {
         {/* RIGHT: Event Log */}
         <div className="lg:col-span-1">
           <div className="bg-gray-800 rounded-lg border border-gray-700 p-4 h-full flex flex-col">
-            <h3 className="text-white font-bold mb-4 flex items_center gap-2">
+            <h3 className="text-white font-bold mb-4 flex items-center gap-2">
               <Activity size={20} className="text-green-400" />
               Event Log
             </h3>
             <div
               className="space-y-2 overflow-y-auto"
-              style={{ maxHeight: '800px' }}
+              style={{ maxHeight: "800px" }}
             >
               {eventLog.length === 0 ? (
                 <div className="text-gray-500 text-sm italic">
                   No events yet. Start the simulation to see activity.
                 </div>
               ) : (
-                eventLog.map(event => (
+                eventLog.map((event) => (
                   <div
                     key={event.id}
                     className={`p-3 rounded text-sm border-l-4 ${
-                      event.type === 'emergency'
-                        ? 'bg-red-900 bg-opacity-30 border-red-500 text-red-200'
-                        : event.type === 'success'
-                        ? 'bg-green-900 bg-opacity-30 border-green-500 text-green-200'
-                        : event.type === 'signal'
-                        ? 'bg-yellow-900 bg-opacity-30 border-yellow-500 text-yellow-200'
-                        : event.type === 'traffic'
-                        ? 'bg-blue-900 bg-opacity-30 border-blue-500 text-blue-200'
-                        : 'bg-gray-700 border-gray-600 text-gray-300'
+                      event.type === "emergency"
+                        ? "bg-red-900 bg-opacity-30 border-red-500 text-red-200"
+                        : event.type === "success"
+                        ? "bg-green-900 bg-opacity-30 border-green-500 text-green-200"
+                        : event.type === "signal"
+                        ? "bg-yellow-900 bg-opacity-30 border-yellow-500 text-yellow-200"
+                        : event.type === "traffic"
+                        ? "bg-blue-900 bg-opacity-30 border-blue-500 text-blue-200"
+                        : "bg-gray-700 border-gray-600 text-gray-300"
                     }`}
                   >
                     <div className="font-mono text-xs opacity-70 mb-1">
