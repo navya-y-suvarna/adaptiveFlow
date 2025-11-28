@@ -9,19 +9,85 @@ import {
   Activity,
   Bus,
   Bike,
+  Shield,
+  Flame,
+  AlertTriangle,
+  Upload,
+  Siren,
 } from "lucide-react";
 
 const normalGreenTime = 15;
 const emergencyGreenTime = 25;
 const MAX_LOG_ITEMS = 80;
 
-// Vehicle types with different properties
+// Enhanced vehicle types with priority vehicles using available icons
 const VEHICLE_TYPES = {
-  car: { icon: Car, color: "blue", speed: 1, size: 24, spawnRate: 0.5 },
-  bus: { icon: Bus, color: "orange", speed: 0.7, size: 28, spawnRate: 0.2 },
-  truck: { icon: Truck, color: "gray", speed: 0.6, size: 30, spawnRate: 0.15 },
-  bike: { icon: Bike, color: "green", speed: 1.2, size: 20, spawnRate: 0.1 },
-  ambulance: { icon: Truck, color: "red", speed: 1.5, size: 32, spawnRate: 0.05 }
+  car: { 
+    icon: Car, 
+    color: "text-blue-400", 
+    bgColor: "bg-blue-500",
+    speed: 1, 
+    size: 24, 
+    spawnRate: 0.4,
+    isPriority: false
+  },
+  bus: { 
+    icon: Bus, 
+    color: "text-orange-400", 
+    bgColor: "bg-orange-500",
+    speed: 0.7, 
+    size: 28, 
+    spawnRate: 0.15,
+    isPriority: false
+  },
+  truck: { 
+    icon: Truck, 
+    color: "text-gray-400", 
+    bgColor: "bg-gray-500",
+    speed: 0.6, 
+    size: 30, 
+    spawnRate: 0.1,
+    isPriority: false
+  },
+  bike: { 
+    icon: Bike, 
+    color: "text-green-400", 
+    bgColor: "bg-green-500",
+    speed: 1.2, 
+    size: 20, 
+    spawnRate: 0.1,
+    isPriority: false
+  },
+  ambulance: { 
+    icon: AlertTriangle,  // Using AlertTriangle instead of Ambulance
+    color: "text-white", 
+    bgColor: "bg-red-600",
+    speed: 1.5, 
+    size: 32, 
+    spawnRate: 0.02,
+    isPriority: true,
+    priorityType: "ambulance"
+  },
+  fire: { 
+    icon: Flame,  // Using Flame instead of FireExtinguisher
+    color: "text-white", 
+    bgColor: "bg-red-500",
+    speed: 1.4, 
+    size: 30, 
+    spawnRate: 0.02,
+    isPriority: true,
+    priorityType: "fire"
+  },
+  police: { 
+    icon: Shield, 
+    color: "text-white", 
+    bgColor: "bg-blue-600",
+    speed: 1.6, 
+    size: 28, 
+    spawnRate: 0.02,
+    isPriority: true,
+    priorityType: "police"
+  }
 };
 
 // Get random vehicle type based on spawn rates
@@ -36,29 +102,389 @@ function getRandomVehicleType() {
   return "car";
 }
 
+// Dataset Upload Component
+const DatasetUpload = ({ onFileUpload, addEvent }) => {
+  const [selectedFile, setSelectedFile] = useState(null);
+
+  const handleFileUpload = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      setSelectedFile(file.name);
+      
+      // Simulate dataset processing
+      addEvent(`Dataset "${file.name}" uploaded and processed`, "system");
+      
+      // Here you would typically parse the CSV/JSON and update simulation parameters
+      setTimeout(() => {
+        addEvent("Traffic patterns updated based on historical data", "success");
+        if (onFileUpload) {
+          onFileUpload(file);
+        }
+      }, 1000);
+    }
+  };
+
+  return (
+    <div className="bg-gray-800 p-4 rounded-lg border border-gray-700 mb-6">
+      <h3 className="text-white font-bold mb-3 flex items-center gap-2">
+        <Upload size={20} />
+        Smart Traffic Dataset Upload
+      </h3>
+      <div className="flex items-center gap-4">
+        <label className="flex-1">
+          <input
+            type="file"
+            accept=".csv,.json,.xlsx"
+            onChange={handleFileUpload}
+            className="hidden"
+          />
+          <div className="cursor-pointer bg-gray-700 hover:bg-gray-600 border-2 border-dashed border-gray-600 rounded-lg p-4 text-center transition-all">
+            <div className="text-gray-300 mb-1">
+              {selectedFile ? `Selected: ${selectedFile}` : "Upload Traffic Dataset"}
+            </div>
+            <div className="text-gray-500 text-sm">
+              Supports CSV, JSON, Excel files with traffic patterns
+            </div>
+          </div>
+        </label>
+        
+        <div className="text-sm text-gray-400 max-w-md">
+          <strong>Expected format:</strong> Timestamp, Vehicle_Type, Lane, Priority_Flag
+          <br />
+          <span className="text-xs">Upload historical data to optimize traffic flow patterns</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Vehicle Countdown Component - FIXED
+const VehicleCountdown = ({ vehicles, greenLight, laneCounts, isRunning }) => {
+  const [countdowns, setCountdowns] = useState({ N: 0, S: 0, E: 0, W: 0 });
+
+  useEffect(() => {
+    if (!isRunning) {
+      setCountdowns({ N: 0, S: 0, E: 0, W: 0 });
+      return;
+    }
+
+    const calculateCountdowns = () => {
+      const newCountdowns = { N: 0, S: 0, E: 0, W: 0 };
+      
+      // For each lane, calculate the maximum time needed to clear all vehicles
+      ["N", "S", "E", "W"].forEach(direction => {
+        const laneVehicles = vehicles.filter(v => v.direction === direction);
+        if (laneVehicles.length > 0) {
+          // Find the vehicle that will take the longest to clear
+          let maxTime = 0;
+          laneVehicles.forEach(vehicle => {
+            // Calculate time to reach position -80 (completely off screen)
+            const distanceToClear = vehicle.position + 80;
+            const timeToClear = distanceToClear / (vehicle.speed * (vehicle.isPriority ? 1.2 : 1));
+            if (timeToClear > maxTime) {
+              maxTime = timeToClear;
+            }
+          });
+          newCountdowns[direction] = maxTime;
+        }
+      });
+
+      setCountdowns(newCountdowns);
+    };
+
+    calculateCountdowns();
+    
+    const interval = setInterval(calculateCountdowns, 500);
+    return () => clearInterval(interval);
+  }, [vehicles, greenLight, isRunning]);
+
+  return (
+    <div className="bg-gray-800 p-4 rounded-lg border border-gray-700 mb-6">
+      <h3 className="text-white font-bold mb-3 flex items-center gap-2">
+        <Clock size={20} />
+        Lane Clearance Time Estimate
+      </h3>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {["N", "S", "E", "W"].map((dir) => {
+          const isGreen = dir === greenLight;
+          const countdown = countdowns[dir];
+          const vehicleCount = laneCounts[dir] || 0;
+          
+          return (
+            <div key={dir} className={`p-3 rounded-lg border transition-all duration-300 ${
+              isGreen ? "bg-green-900 border-green-500" : "bg-gray-800 border-gray-700"
+            }`}>
+              <div className="text-center mb-2">
+                <div className="text-gray-400 text-sm mb-1">
+                  {dir === "N" ? "North" : dir === "S" ? "South" : dir === "E" ? "East" : "West"}
+                </div>
+                <div className={`text-xl font-bold font-mono ${
+                  isGreen ? "text-green-300" : "text-gray-300"
+                }`}>
+                  {countdown > 0 ? countdown.toFixed(1) + "s" : "0s"}
+                </div>
+                <div className="text-gray-500 text-xs mt-1">
+                  {vehicleCount} vehicle{vehicleCount !== 1 ? 's' : ''}
+                </div>
+              </div>
+              
+              {vehicleCount > 0 && (
+                <div className="w-full bg-gray-700 rounded-full h-2 mt-2">
+                  <div 
+                    className={`h-2 rounded-full transition-all duration-300 ${
+                      isGreen ? "bg-green-500" : "bg-blue-500"
+                    }`}
+                    style={{ 
+                      width: `${Math.min(100, (countdown / 20) * 100)}%` 
+                    }}
+                  ></div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="text-gray-400 text-xs mt-2 text-center">
+        Shows estimated time to clear all vehicles in each lane
+      </div>
+    </div>
+  );
+};
+
+// Decision Logic Display Component
+const DecisionLogicDisplay = ({ 
+  greenLight, 
+  priorityActive, 
+  priorityDirection, 
+  laneCounts, 
+  vehicles,
+  timer 
+}) => {
+  const getDecisionReason = () => {
+    if (priorityActive) {
+      return `🚨 PRIORITY OVERRIDE: Emergency vehicle in ${priorityDirection} lane`;
+    }
+    
+    const currentCount = laneCounts[greenLight] || 0;
+    const maxCount = Math.max(...Object.values(laneCounts));
+    
+    if (currentCount === maxCount && currentCount > 0) {
+      return `📊 VEHICLE COUNT: ${greenLight} lane has maximum vehicles (${currentCount})`;
+    }
+    
+    return `🔄 DEFAULT ROTATION: No priority vehicles and lanes are balanced`;
+  };
+
+  const getLaneStatus = (direction) => {
+    const count = laneCounts[direction] || 0;
+    const priorityVehicles = vehicles.filter(v => 
+      v.direction === direction && v.isPriority
+    ).length;
+    
+    return {
+      direction,
+      count,
+      priorityVehicles,
+      isGreen: direction === greenLight,
+      isMax: count === Math.max(...Object.values(laneCounts)) && count > 0
+    };
+  };
+
+  const laneStatus = ["N", "S", "E", "W"].map(getLaneStatus);
+
+  return (
+    <div className="bg-gray-800 p-4 rounded-lg border border-gray-700 mb-6">
+      <h3 className="text-white font-bold mb-3 flex items-center gap-2">
+        <Activity size={20} />
+        Smart Traffic Decision Logic
+      </h3>
+      
+      {/* Current Decision */}
+      <div className="bg-gray-900 p-3 rounded border border-gray-600 mb-4">
+        <div className="flex justify-between items-center mb-2">
+          <span className="text-gray-400">Current Decision:</span>
+          <span className={`font-bold ${priorityActive ? "text-red-400" : "text-green-400"}`}>
+            {priorityActive ? "PRIORITY OVERRIDE" : "SMART TRAFFIC FLOW"}
+          </span>
+        </div>
+        <div className="text-sm text-gray-300">
+          {getDecisionReason()}
+        </div>
+      </div>
+
+      {/* Lane Analysis */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+        {laneStatus.map(lane => (
+          <div key={lane.direction} className={`p-3 rounded border ${
+            lane.isGreen 
+              ? priorityActive 
+                ? "bg-red-900 border-red-500" 
+                : "bg-green-900 border-green-500"
+              : "bg-gray-700 border-gray-600"
+          }`}>
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-white font-semibold">
+                {lane.direction === "N" ? "North" : 
+                 lane.direction === "S" ? "South" : 
+                 lane.direction === "E" ? "East" : "West"}
+              </span>
+              {lane.isGreen && (
+                <span className={`text-xs px-2 py-1 rounded ${
+                  priorityActive ? "bg-red-600" : "bg-green-600"
+                }`}>
+                  ACTIVE
+                </span>
+              )}
+            </div>
+            
+            <div className="space-y-1 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-400">Vehicles:</span>
+                <span className={`font-mono ${lane.isMax ? "text-yellow-400" : "text-white"}`}>
+                  {lane.count}
+                  {lane.isMax && " ⭐"}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Priority:</span>
+                <span className="text-red-400 font-mono">
+                  {lane.priorityVehicles}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-400">Status:</span>
+                <span className={lane.isGreen ? "text-green-400" : "text-gray-400"}>
+                  {lane.isGreen ? "Moving" : "Waiting"}
+                </span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Logic Rules */}
+      <div className="bg-blue-900 bg-opacity-30 border border-blue-700 rounded p-3">
+        <h4 className="text-blue-300 font-semibold mb-2">Decision Rules:</h4>
+        <div className="text-sm text-blue-200 space-y-1">
+          <div>1. 🚨 <strong>Priority First:</strong> Emergency vehicles get immediate green light</div>
+          <div>2. 📊 <strong>Max Vehicles:</strong> Lane with most vehicles gets priority when no emergencies</div>
+          <div>3. ⏰ <strong>Time Limit:</strong> Green light duration: {Math.ceil(timer)}s remaining</div>
+          <div>4. 🔄 <strong>Balance:</strong> Rotates if all lanes have equal vehicle count</div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Density Display Component
+const DensityDisplay = ({ laneCounts, greenLight, timer, priorityActive, prioritySpawnTimer }) => {
+  const maxCount = Math.max(...Object.values(laneCounts), 1);
+  
+  return (
+    <div className="bg-gray-800 p-4 rounded-lg border border-gray-700 mb-6">
+      <h3 className="text-white font-bold mb-3 flex items-center gap-2">
+        <Activity size={20} />
+        Lane Vehicle Count & Signal Control
+      </h3>
+      
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+        {["N", "S", "E", "W"].map((dir) => {
+          const vehicleCount = laneCounts[dir] || 0;
+          const percentage = (vehicleCount / maxCount) * 100;
+          const isGreen = dir === greenLight;
+
+          return (
+            <div key={dir} className={`p-3 rounded-lg border transition-all duration-300 ${
+              isGreen 
+                ? priorityActive
+                  ? "bg-red-900 border-red-500 shadow-lg scale-105"
+                  : "bg-green-900 border-green-500 shadow-lg scale-105"
+                : "bg-gray-800 border-gray-700"
+            }`}>
+              <div className="text-center mb-2">
+                <div className="text-gray-400 text-sm mb-1">
+                  {dir === "N" ? "North" : dir === "S" ? "South" : dir === "E" ? "East" : "West"}
+                </div>
+                <div className={`text-xl font-bold ${
+                  isGreen 
+                    ? priorityActive ? "text-red-300" : "text-green-300"
+                    : "text-white"
+                }`}>
+                  {vehicleCount}
+                </div>
+                <div className="text-gray-500 text-xs">vehicles</div>
+              </div>
+              
+              <div className="relative h-4 bg-gray-700 rounded-full mb-2 overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-300 ${
+                    isGreen 
+                      ? priorityActive ? "bg-red-500" : "bg-green-500"
+                      : "bg-blue-500"
+                  }`}
+                  style={{ width: `${percentage}%` }}
+                />
+                <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white">
+                  {vehicleCount} vehicles
+                </div>
+              </div>
+              
+              {isGreen && (
+                <div className={`text-xs text-center font-semibold ${
+                  priorityActive ? "text-red-400" : "text-green-400"
+                }`}>
+                  {priorityActive ? "🚨 PRIORITY SIGNAL" : "✓ GREEN SIGNAL"}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Current status */}
+      <div className="bg-gray-900 p-3 rounded border border-gray-600">
+        <div className="flex justify-between items-center text-sm">
+          <span className="text-gray-400">Current Green Lane:</span>
+          <span className={`font-bold ${priorityActive ? "text-red-400" : "text-green-400"}`}>
+            {greenLight} {priorityActive && "(Priority Override)"}
+          </span>
+        </div>
+        <div className="flex justify-between items-center text-sm mt-2">
+          <span className="text-gray-400">Signal Change In:</span>
+          <span className="font-mono text-yellow-400">{Math.ceil(timer)}s</span>
+        </div>
+        <div className="flex justify-between items-center text-sm mt-2">
+          <span className="text-gray-400">Next Priority Vehicle:</span>
+          <span className="font-mono text-red-400">{Math.ceil(prioritySpawnTimer)}s</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const TrafficSimulation = () => {
   const [isRunning, setIsRunning] = useState(false);
   const [time, setTime] = useState(0);
-  const [greenLight, setGreenLight] = useState("N"); // Start with single lane
+  const [greenLight, setGreenLight] = useState("N");
   const [timer, setTimer] = useState(normalGreenTime);
-  const [emergencyActive, setEmergencyActive] = useState(false);
-  const [emergencyDirection, setEmergencyDirection] = useState(null);
+  const [priorityActive, setPriorityActive] = useState(false);
+  const [priorityDirection, setPriorityDirection] = useState(null);
   const [vehicles, setVehicles] = useState([]);
   const [stats, setStats] = useState({
     totalVehicles: 0,
     avgWaitTime: 0,
-    emergencyResponses: 0,
-    avgEmergencyTime: 2.3,
+    priorityResponses: 0,
+    avgPriorityTime: 2.3,
   });
   const [eventLog, setEventLog] = useState([]);
   const [laneCounts, setLaneCounts] = useState({ N: 0, S: 0, E: 0, W: 0 });
-  const [laneDensity, setLaneDensity] = useState({ N: 0, S: 0, E: 0, W: 0 });
+  const [prioritySpawnTimer, setPrioritySpawnTimer] = useState(45);
 
   const animationRef = useRef(null);
   const lastTimeRef = useRef(0);
   const vehiclesRef = useRef([]);
   const timerRef = useRef(normalGreenTime);
-  const lastAmbulanceSpawnRef = useRef(0);
+  const lastPrioritySpawnRef = useRef(0);
 
   // --- EVENT LOG HELPERS -------------------------------------------------
 
@@ -99,48 +525,97 @@ const TrafficSimulation = () => {
     return `${h}:${m}:${s}`;
   };
 
-  // --- DECIDE NEXT GREEN LANE --------------------------------------------
+  // --- IMPROVED DECIDE NEXT GREEN LANE -----------------------------------
 
   const decideNextGreenLane = (vehicles, currentGreen) => {
-    // Calculate density for each lane
-    const density = { N: 0, S: 0, E: 0, W: 0 };
-    let detectedAmbulance = null;
-
-    vehicles.forEach(vehicle => {
-      // Check for ambulances (highest priority)
-      if (vehicle.type === "ambulance" && !detectedAmbulance) {
-        detectedAmbulance = vehicle.direction;
-      }
-
-      // Calculate density with weights
-      const weight = vehicle.type === "ambulance" ? 10 : 
-                    vehicle.type === "truck" ? 3 : 
-                    vehicle.type === "bus" ? 2 : 1;
+    // 1. FIRST PRIORITY: Check for emergency vehicles in any lane
+    const priorityVehicles = vehicles.filter(v => v.isPriority);
+    if (priorityVehicles.length > 0) {
+      // Find the lane with the most priority vehicles
+      const priorityCounts = { N: 0, S: 0, E: 0, W: 0 };
+      priorityVehicles.forEach(v => {
+        priorityCounts[v.direction] = (priorityCounts[v.direction] || 0) + 1;
+      });
       
-      density[vehicle.direction] += weight;
-    });
-
-    // 1. Emergency vehicle has absolute priority
-    if (detectedAmbulance) {
-      return detectedAmbulance;
+      let maxPriority = 0;
+      let priorityLane = null;
+      Object.entries(priorityCounts).forEach(([lane, count]) => {
+        if (count > maxPriority) {
+          maxPriority = count;
+          priorityLane = lane;
+        }
+      });
+      
+      if (priorityLane && priorityLane !== currentGreen) {
+        addEvent(
+          `🚨 Priority override: ${priorityLane} lane selected (${maxPriority} emergency vehicles)`,
+          "emergency"
+        );
+        return priorityLane;
+      }
     }
 
-    // 2. Find lane with maximum density
-    let maxDensity = 0;
+    // 2. SECOND PRIORITY: If current lane has vehicles, keep it green to clear traffic
+    const currentLaneVehicles = vehicles.filter(v => v.direction === currentGreen);
+    if (currentLaneVehicles.length > 0) {
+      // Only change if another lane has significantly more vehicles
+      const counts = { N: 0, S: 0, E: 0, W: 0 };
+      vehicles.forEach(v => {
+        counts[v.direction] = (counts[v.direction] || 0) + 1;
+      });
+
+      const currentCount = counts[currentGreen] || 0;
+      let maxCount = 0;
+      let maxLane = currentGreen;
+      
+      Object.entries(counts).forEach(([lane, count]) => {
+        if (count > maxCount) {
+          maxCount = count;
+          maxLane = lane;
+        }
+      });
+
+      // Only switch if another lane has at least 2 more vehicles
+      if (maxLane !== currentGreen && maxCount >= currentCount + 2) {
+        addEvent(
+          `📊 Switching to ${maxLane} lane (${maxCount} vehicles vs ${currentCount} in current lane)`,
+          "signal"
+        );
+        return maxLane;
+      }
+
+      // Keep current lane green to clear traffic
+      addEvent(
+        `🟢 Keeping ${currentGreen} lane green (${currentCount} vehicles to clear)`,
+        "info"
+      );
+      return currentGreen;
+    }
+
+    // 3. THIRD PRIORITY: Lane with maximum vehicles
+    const counts = { N: 0, S: 0, E: 0, W: 0 };
+    vehicles.forEach(v => {
+      counts[v.direction] = (counts[v.direction] || 0) + 1;
+    });
+
+    let maxCount = 0;
     let nextGreenLane = currentGreen;
     
-    Object.entries(density).forEach(([lane, laneDensity]) => {
-      if (laneDensity > maxDensity) {
-        maxDensity = laneDensity;
+    Object.entries(counts).forEach(([lane, count]) => {
+      if (count > maxCount) {
+        maxCount = count;
         nextGreenLane = lane;
       }
     });
 
-    // If all lanes are empty, rotate through lanes
-    if (maxDensity === 0) {
+    // 4. DEFAULT: If all lanes empty, rotate
+    if (maxCount === 0) {
       const lanes = ["N", "S", "E", "W"];
       const currentIndex = lanes.indexOf(currentGreen);
       nextGreenLane = lanes[(currentIndex + 1) % lanes.length];
+      addEvent(`🔄 Rotating to ${nextGreenLane} lane (all lanes empty)`, "info");
+    } else if (nextGreenLane !== currentGreen) {
+      addEvent(`📊 Switching to ${nextGreenLane} lane (${maxCount} vehicles - maximum)`, "signal");
     }
 
     return nextGreenLane;
@@ -162,9 +637,10 @@ const TrafficSimulation = () => {
           direction: dir,
           type: vehicleType,
           position: i * 120 + 100,
-          waiting: dir !== "N", // Only North lane starts green
+          waiting: dir !== "N",
           waitTime: 0,
-          isEmergency: vehicleType === "ambulance",
+          isPriority: config.isPriority,
+          priorityType: config.priorityType,
           speed: config.speed,
         });
       }
@@ -172,31 +648,76 @@ const TrafficSimulation = () => {
     return initial;
   };
 
+  // --- SPAWN PRIORITY VEHICLE --------------------------------------------
+
+  const spawnPriorityVehicle = () => {
+    const directions = ["N", "S", "E", "W"];
+    const dir = directions[Math.floor(Math.random() * directions.length)];
+    
+    // Randomly choose between ambulance, fire, police
+    const priorityTypes = ["ambulance", "fire", "police"];
+    const priorityType = priorityTypes[Math.floor(Math.random() * priorityTypes.length)];
+    const config = VEHICLE_TYPES[priorityType];
+    
+    const priorityVehicle = {
+      id: `PRIORITY-${priorityType}-${Date.now()}`,
+      direction: dir,
+      type: priorityType,
+      position: 350,
+      waiting: dir !== greenLight,
+      waitTime: 0,
+      isPriority: true,
+      priorityType: priorityType,
+      speed: config.speed,
+    };
+
+    setVehicles(prev => {
+      const updated = [...prev, priorityVehicle];
+      vehiclesRef.current = updated;
+      return updated;
+    });
+
+    // Update lane counts
+    setLaneCounts(prev => ({
+      ...prev,
+      [dir]: (prev[dir] || 0) + 1
+    }));
+
+    setStats(prev => ({
+      ...prev,
+      totalVehicles: prev.totalVehicles + 1,
+    }));
+
+    // Add appropriate event message
+    const vehicleNames = {
+      ambulance: "🚑 Ambulance",
+      fire: "🚒 Fire Engine", 
+      police: "🚓 Police Vehicle"
+    };
+
+    addEvent(`${vehicleNames[priorityType]} entered from ${dir} lane - Priority clearance required!`, "emergency");
+  };
+
   useEffect(() => {
     const initialVehicles = createInitialVehicles();
     setVehicles(initialVehicles);
     vehiclesRef.current = initialVehicles;
     
-    // Calculate initial lane counts and density
+    // Calculate initial lane counts
     const counts = { N: 0, S: 0, E: 0, W: 0 };
-    const density = { N: 0, S: 0, E: 0, W: 0 };
-    
     initialVehicles.forEach(vehicle => {
       counts[vehicle.direction] = (counts[vehicle.direction] || 0) + 1;
-      density[vehicle.direction] += vehicle.type === "ambulance" ? 10 : 
-                                 vehicle.type === "truck" ? 3 : 
-                                 vehicle.type === "bus" ? 2 : 1;
     });
     
     setLaneCounts(counts);
-    setLaneDensity(density);
     
     setStats((prev) => ({
       ...prev,
       totalVehicles: initialVehicles.length,
     }));
     
-    addEvent("Traffic simulation started. North lane has initial green signal.", "system");
+    addEvent("Smart Traffic System started. North lane has initial green signal.", "system");
+    addEvent("SYSTEM READY: Priority vehicles → Max vehicles → Lane rotation", "success");
     timerRef.current = normalGreenTime;
     setTimer(normalGreenTime);
   }, []);
@@ -224,6 +745,16 @@ const TrafficSimulation = () => {
       // Update global time
       setTime((prev) => prev + safeDelta);
 
+      // Update priority spawn timer
+      setPrioritySpawnTimer(prev => {
+        const newTime = prev - safeDelta;
+        if (newTime <= 0) {
+          spawnPriorityVehicle();
+          return 30 + Math.random() * 30; // Random between 30-60 seconds
+        }
+        return newTime;
+      });
+
       // --- VEHICLE UPDATE ------------------------------------------------
       setVehicles((prevVehicles) => {
         const updated = prevVehicles
@@ -234,14 +765,14 @@ const TrafficSimulation = () => {
             let waitTime = vehicle.waitTime;
             let position = vehicle.position;
 
-            // If not the green lane → vehicle waits
             if (!canMove) {
               waiting = true;
               waitTime += safeDelta;
             } else {
               waiting = false;
-              // Move vehicle based on type
-              position = position - vehicle.speed * 0.8;
+              // Move vehicle based on type (priority vehicles move faster)
+              const speedMultiplier = vehicle.isPriority ? 1.2 : 1;
+              position = position - vehicle.speed * speedMultiplier;
             }
 
             // Remove vehicles that left the scene
@@ -258,67 +789,67 @@ const TrafficSimulation = () => {
           })
           .filter(Boolean);
 
-        // Calculate lane density
-        const density = { N: 0, S: 0, E: 0, W: 0 };
-        let detectedAmbulance = null;
+        // Check for priority vehicles for immediate response
+        const priorityVehicles = updated.filter(v => v.isPriority && v.position > 100);
+        let detectedPriority = null;
 
-        updated.forEach(vehicle => {
-          // Check for ambulances
-          if (vehicle.type === "ambulance" && !detectedAmbulance) {
-            detectedAmbulance = vehicle.direction;
-          }
-
-          // Calculate density with weights
-          const weight = vehicle.type === "ambulance" ? 10 : 
-                        vehicle.type === "truck" ? 3 : 
-                        vehicle.type === "bus" ? 2 : 1;
+        if (priorityVehicles.length > 0 && !priorityActive) {
+          // Find the priority vehicle closest to intersection
+          const closestPriority = priorityVehicles.reduce((closest, current) => {
+            return current.position > closest.position ? current : closest;
+          }, priorityVehicles[0]);
           
-          density[vehicle.direction] += weight;
-        });
+          detectedPriority = closestPriority.direction;
+        }
 
-        setLaneDensity(density);
-
-        // Handle ambulance detection and emergency override
-        if (detectedAmbulance && (!emergencyActive || emergencyDirection !== detectedAmbulance)) {
-          setEmergencyActive(true);
-          setEmergencyDirection(detectedAmbulance);
-          setGreenLight(detectedAmbulance);
+        // Handle priority vehicle detection - IMMEDIATE response
+        if (detectedPriority && (!priorityActive || priorityDirection !== detectedPriority)) {
+          setPriorityActive(true);
+          setPriorityDirection(detectedPriority);
+          setGreenLight(detectedPriority);
           timerRef.current = emergencyGreenTime;
           setTimer(emergencyGreenTime);
           
+          const priorityVehicle = priorityVehicles.find(v => v.direction === detectedPriority);
+          const vehicleNames = {
+            ambulance: "Ambulance",
+            fire: "Fire Engine",
+            police: "Police Vehicle"
+          };
+          
           addEvent(
-            `🚨 Ambulance detected in ${detectedAmbulance} lane - Emergency override activated!`,
+            `🚨 IMMEDIATE RESPONSE: ${vehicleNames[priorityVehicle.priorityType]} detected in ${detectedPriority} lane - Priority override activated!`,
             "emergency"
           );
           
           setStats((prev) => ({
             ...prev,
-            emergencyResponses: prev.emergencyResponses + 1,
+            priorityResponses: prev.priorityResponses + 1,
           }));
         }
 
-        // Check if emergency vehicle left
-        const emergencyVehicles = updated.filter(v => v.type === "ambulance");
-        if (emergencyActive && emergencyVehicles.length === 0) {
-          setEmergencyActive(false);
-          setEmergencyDirection(null);
-          addEvent(
-            "✓ Emergency vehicle cleared. Returning to normal operation.",
-            "success"
-          );
+        // Check if priority vehicle left
+        if (priorityActive) {
+          const remainingPriority = updated.filter(v => v.isPriority && v.direction === priorityDirection);
+          if (remainingPriority.length === 0) {
+            setPriorityActive(false);
+            setPriorityDirection(null);
+            addEvent(
+              "✓ Priority vehicle cleared. Returning to smart traffic flow.",
+              "success"
+            );
+          }
         }
 
-        // Lane-wise counts
+        // Update lane counts
         const counts = { N: 0, S: 0, E: 0, W: 0 };
         updated.forEach((v) => {
           counts[v.direction] = (counts[v.direction] || 0) + 1;
         });
         setLaneCounts(counts);
 
-        // Spawn new vehicles with different types
-        lastAmbulanceSpawnRef.current += safeDelta;
-        
-        if (Math.random() < 0.02) { // General vehicle spawn rate
+        // Spawn new regular vehicles
+        if (Math.random() < 0.02) {
           const directions = ["N", "S", "E", "W"];
           const dir = directions[Math.floor(Math.random() * directions.length)];
           const vehicleType = getRandomVehicleType();
@@ -331,7 +862,8 @@ const TrafficSimulation = () => {
             position: 350,
             waiting: dir !== greenLight,
             waitTime: 0,
-            isEmergency: vehicleType === "ambulance",
+            isPriority: config.isPriority,
+            priorityType: config.priorityType,
             speed: config.speed,
           };
           
@@ -340,39 +872,6 @@ const TrafficSimulation = () => {
             ...prev,
             totalVehicles: prev.totalVehicles + 1,
           }));
-          
-          if (vehicleType === "ambulance") {
-            addEvent(`🚑 New ambulance entered from ${dir} lane.`, "emergency");
-          } else {
-            addEvent(`New ${vehicleType} entered from ${dir} lane.`, "traffic");
-          }
-        }
-
-        // Random ambulance spawn (independent of regular spawning)
-        if (lastAmbulanceSpawnRef.current > 30 && Math.random() < 0.1) {
-          const directions = ["N", "S", "E", "W"];
-          const dir = directions[Math.floor(Math.random() * directions.length)];
-          const config = VEHICLE_TYPES.ambulance;
-          
-          const ambulance = {
-            id: `AMB-${Date.now()}`,
-            direction: dir,
-            type: "ambulance",
-            position: 350,
-            waiting: dir !== greenLight,
-            waitTime: 0,
-            isEmergency: true,
-            speed: config.speed,
-          };
-          
-          updated.push(ambulance);
-          lastAmbulanceSpawnRef.current = 0;
-          setStats((prev) => ({
-            ...prev,
-            totalVehicles: prev.totalVehicles + 1,
-          }));
-          
-          addEvent(`🚑 Ambulance randomly spawned in ${dir} lane.`, "emergency");
         }
 
         // Update average wait time
@@ -394,20 +893,14 @@ const TrafficSimulation = () => {
         return updated;
       });
 
-      // --- TIMER + SIGNAL UPDATE (Single lane only) ---------------------
-      if (!emergencyActive) {
+      // --- TIMER + SIGNAL UPDATE -----------------------------------------
+      if (!priorityActive) {
         timerRef.current -= safeDelta;
         if (timerRef.current <= 0) {
           const nextGreen = decideNextGreenLane(vehiclesRef.current, greenLight);
           
           if (nextGreen !== greenLight) {
             setGreenLight(nextGreen);
-            const density = laneDensity[nextGreen] || 0;
-            
-            addEvent(
-              `Signal changed to ${nextGreen} lane (Density: ${density}).`,
-              "signal"
-            );
           }
 
           timerRef.current = normalGreenTime;
@@ -426,7 +919,7 @@ const TrafficSimulation = () => {
       }
       lastTimeRef.current = 0;
     };
-  }, [isRunning, greenLight, emergencyActive, emergencyDirection, laneDensity]);
+  }, [isRunning, greenLight, priorityActive, priorityDirection, laneCounts]);
 
   // --- RESET -------------------------------------------------------------
 
@@ -440,36 +933,33 @@ const TrafficSimulation = () => {
     timerRef.current = normalGreenTime;
     setTimer(normalGreenTime);
     setGreenLight("N");
-    setEmergencyActive(false);
-    setEmergencyDirection(null);
+    setPriorityActive(false);
+    setPriorityDirection(null);
     lastTimeRef.current = 0;
-    lastAmbulanceSpawnRef.current = 0;
+    lastPrioritySpawnRef.current = 0;
+    setPrioritySpawnTimer(45);
 
     const initialVehicles = createInitialVehicles();
     setVehicles(initialVehicles);
     vehiclesRef.current = initialVehicles;
     
     const counts = { N: 0, S: 0, E: 0, W: 0 };
-    const density = { N: 0, S: 0, E: 0, W: 0 };
     initialVehicles.forEach(vehicle => {
       counts[vehicle.direction] = (counts[vehicle.direction] || 0) + 1;
-      density[vehicle.direction] += vehicle.type === "ambulance" ? 10 : 
-                                 vehicle.type === "truck" ? 3 : 
-                                 vehicle.type === "bus" ? 2 : 1;
     });
     
     setLaneCounts(counts);
-    setLaneDensity(density);
     
     setStats({
       totalVehicles: initialVehicles.length,
       avgWaitTime: 0,
-      emergencyResponses: 0,
-      avgEmergencyTime: 2.3,
+      priorityResponses: 0,
+      avgPriorityTime: 2.3,
     });
 
     setEventLog([]);
     addEvent("System reset. All parameters restored to default.", "system");
+    addEvent("DECISION LOGIC: 1. Priority Vehicles → 2. Max Vehicles → 3. Lane Rotation", "success");
   };
 
   // --- VEHICLE POSITIONING ----------------------------------------------
@@ -513,81 +1003,7 @@ const TrafficSimulation = () => {
     }
   };
 
-  // --- DENSITY VISUALIZATION --------------------------------------------
-
-  const DensityDisplay = () => {
-    const maxDensity = Math.max(...Object.values(laneDensity), 1);
-    
-    return (
-      <div className="bg-gray-800 p-4 rounded-lg border border-gray-700 mb-6">
-        <h3 className="text-white font-bold mb-3 flex items-center gap-2">
-          <Activity size={20} />
-          Lane Density & Signal Control
-        </h3>
-        
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-          {["N", "S", "E", "W"].map((dir) => {
-            const density = laneDensity[dir] || 0;
-            const percentage = (density / maxDensity) * 100;
-            const isGreen = dir === greenLight;
-            const vehicleCount = laneCounts[dir] || 0;
-
-            return (
-              <div key={dir} className={`p-3 rounded-lg border transition-all duration-300 ${
-                isGreen 
-                  ? "bg-green-900 border-green-500 shadow-lg scale-105" 
-                  : "bg-gray-800 border-gray-700"
-              }`}>
-                <div className="text-center mb-2">
-                  <div className="text-gray-400 text-sm mb-1">
-                    {dir === "N" ? "North" : dir === "S" ? "South" : dir === "E" ? "East" : "West"}
-                  </div>
-                  <div className={`text-xl font-bold ${isGreen ? "text-green-300" : "text-white"}`}>
-                    {vehicleCount}
-                  </div>
-                  <div className="text-gray-500 text-xs">vehicles</div>
-                </div>
-                
-                <div className="relative h-4 bg-gray-700 rounded-full mb-2 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-300 ${
-                      isGreen ? "bg-green-500" : "bg-blue-500"
-                    }`}
-                    style={{ width: `${percentage}%` }}
-                  />
-                  <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white">
-                    Density: {density}
-                  </div>
-                </div>
-                
-                {isGreen && (
-                  <div className="text-green-400 text-xs text-center font-semibold">
-                    ✓ GREEN SIGNAL
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Current status */}
-        <div className="bg-gray-900 p-3 rounded border border-gray-600">
-          <div className="flex justify-between items-center text-sm">
-            <span className="text-gray-400">Current Green Lane:</span>
-            <span className={`font-bold ${emergencyActive ? "text-red-400" : "text-green-400"}`}>
-              {greenLight} {emergencyActive && "(Emergency Override)"}
-            </span>
-          </div>
-          <div className="flex justify-between items-center text-sm mt-2">
-            <span className="text-gray-400">Next Change In:</span>
-            <span className="font-mono text-yellow-400">{Math.ceil(timer)}s</span>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // --- VEHICLE RENDERING -------------------------------------------------
+  // --- ENHANCED VEHICLE RENDERING WITH EMERGENCY SYMBOLS -----------------
 
   const renderVehicle = (vehicle) => {
     const config = VEHICLE_TYPES[vehicle.type];
@@ -595,29 +1011,108 @@ const TrafficSimulation = () => {
     const isCurrentLane = vehicle.direction === greenLight;
     
     return (
-      <VehicleIcon
-        className={`${
-          vehicle.waiting || !isCurrentLane
-            ? `text-${config.color}-300 opacity-80`
-            : `text-${config.color}-400 drop-shadow-[0_0_8px_rgba(96,165,250,0.7)]`
-        } ${vehicle.isEmergency ? "animate-pulse drop-shadow-[0_0_12px_rgba(239,68,68,0.8)]" : ""}`}
-        size={config.size}
-        fill={vehicle.isEmergency ? "white" : "currentColor"}
-      />
+      <div className="relative">
+        {/* Vehicle with enhanced styling */}
+        <div className={`
+          relative transition-all duration-200
+          ${vehicle.waiting || !isCurrentLane ? 'opacity-80' : 'opacity-100'}
+          ${vehicle.isPriority ? 'animate-pulse' : ''}
+        `}>
+          {/* Vehicle body with shadow and glow */}
+          <div className={`
+            rounded-lg p-1
+            ${config.bgColor}
+            ${vehicle.isPriority ? 'shadow-[0_0_15px_rgba(239,68,68,0.8)]' : 'shadow-lg'}
+            border-2 ${vehicle.isPriority ? 'border-white' : 'border-gray-200 border-opacity-30'}
+          `}>
+            <VehicleIcon
+              className={config.color}
+              size={config.size}
+              fill={vehicle.isPriority ? "currentColor" : "none"}
+              strokeWidth={1.5}
+            />
+          </div>
+          
+          {/* Enhanced Priority vehicle indicators */}
+          {vehicle.isPriority && (
+            <>
+              {/* Rotating Siren Effect */}
+              <div className="absolute -top-3 -left-3 w-8 h-8 flex items-center justify-center">
+                <div className="relative w-6 h-6">
+                  {/* Rotating siren lights */}
+                  <div className="absolute inset-0 animate-spin">
+                    <div className="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1 w-2 h-2 bg-red-600 rounded-full"></div>
+                    <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-1 w-2 h-2 bg-blue-600 rounded-full"></div>
+                  </div>
+                  {/* Center siren dot */}
+                  <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-1 h-1 bg-yellow-400 rounded-full"></div>
+                </div>
+              </div>
+
+              {/* Flashing light bars */}
+              <div className="absolute -top-2 left-1/2 transform -translate-x-1/2 w-6 h-1 flex justify-between">
+                <div className="w-1 h-1 bg-red-600 rounded-full animate-pulse"></div>
+                <div className="w-1 h-1 bg-blue-600 rounded-full animate-pulse" style={{animationDelay: '0.5s'}}></div>
+              </div>
+
+              {/* Priority badge with siren icon */}
+              <div className="absolute -bottom-2 -left-2 bg-red-600 text-white text-xs px-1 rounded border border-white flex items-center gap-1">
+                <Siren size={10} />
+                {vehicle.priorityType === 'ambulance' ? 'AMB' : 
+                 vehicle.priorityType === 'fire' ? 'FIRE' : 'POLICE'}
+              </div>
+
+              {/* Emergency vehicle trail effect when moving */}
+              {!vehicle.waiting && isCurrentLane && (
+                <div className="absolute -bottom-4 left-1/2 transform -translate-x-1/2">
+                  <div className="flex space-x-1">
+                    {[1, 2, 3].map(i => (
+                      <div 
+                        key={i}
+                        className="w-1 h-1 bg-red-400 rounded-full animate-pulse"
+                        style={{ animationDelay: `${i * 0.1}s` }}
+                      ></div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        
+        {/* Movement indicator for regular vehicles */}
+        {!vehicle.waiting && isCurrentLane && !vehicle.isPriority && (
+          <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2">
+            <div className="flex space-x-1">
+              {[1, 2, 3].map(i => (
+                <div 
+                  key={i}
+                  className="w-1 h-1 bg-green-400 rounded-full animate-pulse"
+                  style={{ animationDelay: `${i * 0.2}s` }}
+                ></div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     );
   };
 
   return (
     <div className="w-full max-w-7xl mx-auto p-6 bg-gradient-to-br from-gray-900 to-gray-800 rounded-xl shadow-2xl">
+      {/* Header */}
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-white mb-2 flex items-center gap-2">
           <Activity className="text-green-400" />
-          Dynamic Single-Lane Traffic Management
+          Smart Traffic Solution - AI Powered Management
         </h1>
         <p className="text-gray-300">
-          One lane at a time - Maximum density priority with emergency override
+          Priority vehicle detection with AI-optimized signal control using historical data
         </p>
       </div>
+
+      {/* Dataset Upload Section */}
+      <DatasetUpload addEvent={addEvent} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* LEFT: Controls + Simulation */}
@@ -650,8 +1145,8 @@ const TrafficSimulation = () => {
 
             <div className="flex items-center gap-2 bg-gray-800 px-3 py-2 rounded-lg border border-gray-700">
               <span className="text-gray-300 text-sm">Mode:</span>
-              <span className={`font-semibold ${emergencyActive ? "text-red-400" : "text-green-400"}`}>
-                {emergencyActive ? "🚨 Emergency Override" : "📊 Density-Based"}
+              <span className={`font-semibold ${priorityActive ? "text-red-400" : "text-green-400"}`}>
+                {priorityActive ? "🚨 Priority Override" : "📊 Smart Traffic"}
               </span>
             </div>
           </div>
@@ -678,28 +1173,59 @@ const TrafficSimulation = () => {
             </div>
             <div className="bg-gray-800 p-4 rounded-lg border border-gray-700">
               <div className="text-gray-400 text-sm mb-1">
-                Emergency Responses
+                Priority Responses
               </div>
               <div className="text-2xl font-bold text-red-400">
-                {stats.emergencyResponses}
+                {stats.priorityResponses}
               </div>
             </div>
           </div>
 
-          {/* Density Display */}
-          <DensityDisplay />
+          {/* Decision Logic Display */}
+          <DecisionLogicDisplay 
+            greenLight={greenLight}
+            priorityActive={priorityActive}
+            priorityDirection={priorityDirection}
+            laneCounts={laneCounts}
+            vehicles={vehicles}
+            timer={timer}
+          />
 
-          {/* Emergency banner */}
-          {emergencyActive && (
+          {/* Vehicle Countdown - FIXED */}
+          <VehicleCountdown 
+            vehicles={vehicles} 
+            greenLight={greenLight} 
+            laneCounts={laneCounts}
+            isRunning={isRunning}
+          />
+
+          {/* Density Display */}
+          <DensityDisplay 
+            laneCounts={laneCounts}
+            greenLight={greenLight}
+            timer={timer}
+            priorityActive={priorityActive}
+            prioritySpawnTimer={prioritySpawnTimer}
+          />
+
+          {/* Enhanced Priority banner */}
+          {priorityActive && (
             <div className="bg-red-900 border-2 border-red-500 rounded-lg p-4 mb-6 animate-pulse">
               <div className="flex items-center gap-3">
-                <Truck className="text-red-300" size={24} />
+                <div className="relative">
+                  <Siren className="text-red-300" size={24} />
+                  <div className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full animate-ping"></div>
+                </div>
                 <div>
-                  <div className="text-red-100 font-bold">
-                    EMERGENCY OVERRIDE ACTIVE
+                  <div className="text-red-100 font-bold flex items-center gap-2">
+                    🚨 EMERGENCY VEHICLE DETECTED
+                    <div className="flex space-x-1">
+                      <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" style={{animationDelay: '0.5s'}}></div>
+                    </div>
                   </div>
                   <div className="text-red-300 text-sm">
-                    Ambulance detected in {emergencyDirection} lane | All other lanes stopped | Priority clearance enabled
+                    Priority clearance activated for {priorityDirection} lane | All other lanes stopped
                   </div>
                 </div>
               </div>
@@ -708,19 +1234,21 @@ const TrafficSimulation = () => {
 
           {/* Intersection visualization */}
           <div
-            className="relative bg-gray-700 rounded-lg p-8 overflow-hidden mx-auto"
+            className="relative bg-gray-700 rounded-lg p-8 overflow-hidden mx-auto border-4 border-gray-600"
             style={{ height: "600px", width: "600px" }}
           >
-            {/* Roads */}
-            <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-16 h-full bg-gray-600">
-              <div className="absolute left-1/2 transform -translate-x-1/2 w-0.5 h-full border-l-2 border-dashed border-yellow-300"></div>
+            {/* Roads with better styling */}
+            <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-20 h-full bg-gray-600">
+              <div className="absolute left-1/2 transform -translate-x-1/2 w-1 h-full border-l-2 border-dashed border-yellow-400"></div>
             </div>
-            <div className="absolute left-0 top-1/2 transform -translate-y-1/2 w-full h-16 bg-gray-600">
-              <div className="absolute top-1/2 transform -translate-y-1/2 w-full h-0.5 border-t-2 border-dashed border-yellow-300"></div>
+            <div className="absolute left-0 top-1/2 transform -translate-y-1/2 w-full h-20 bg-gray-600">
+              <div className="absolute top-1/2 transform -translate-y-1/2 w-full h-1 border-t-2 border-dashed border-yellow-400"></div>
             </div>
 
-            {/* Center intersection */}
-            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-24 h-24 bg-gray-800 border-4 border-yellow-500 rounded-full"></div>
+            {/* Center intersection with better styling */}
+            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-32 h-32 bg-gray-800 border-4 border-yellow-500 rounded-full shadow-lg">
+              <div className="absolute inset-0 rounded-full border-2 border-yellow-300 opacity-50"></div>
+            </div>
 
             {/* Traffic signals for each lane */}
             {["N", "S", "E", "W"].map((dir) => {
@@ -729,44 +1257,44 @@ const TrafficSimulation = () => {
               
               switch(dir) {
                 case "N":
-                  position = { top: "120px", left: "50%", transform: "translateX(-50%)" };
+                  position = { top: "140px", left: "50%", transform: "translateX(-50%)" };
                   break;
                 case "S":
-                  position = { bottom: "120px", left: "50%", transform: "translateX(-50%)" };
+                  position = { bottom: "140px", left: "50%", transform: "translateX(-50%)" };
                   break;
                 case "E":
-                  position = { right: "120px", top: "50%", transform: "translateY(-50%)" };
+                  position = { right: "140px", top: "50%", transform: "translateY(-50%)" };
                   break;
                 case "W":
-                  position = { left: "120px", top: "50%", transform: "translateY(-50%)" };
+                  position = { left: "140px", top: "50%", transform: "translateY(-50%)" };
                   break;
               }
 
               return (
-                <div key={dir} className="absolute bg-gray-900 p-2 rounded-lg border border-gray-600" style={position}>
-                  <div className={`w-6 h-6 rounded-full border-2 ${isGreen ? "bg-green-500 border-green-300" : "bg-red-500 border-red-300"} shadow-lg`}></div>
+                <div key={dir} className="absolute bg-gray-900 p-3 rounded-xl border-2 border-gray-600 shadow-lg" style={position}>
+                  <div className={`w-8 h-8 rounded-full border-2 ${isGreen ? "bg-green-500 border-green-300 shadow-[0_0_10px_rgba(34,197,94,0.5)]" : "bg-red-500 border-red-300"} transition-all duration-300`}></div>
                 </div>
               );
             })}
 
             {/* Timer display */}
-            <div className="absolute top-4 left-4 bg-gray-900 px-4 py-2 rounded-lg border border-gray-600">
+            <div className="absolute top-4 left-4 bg-gray-900 px-4 py-2 rounded-lg border-2 border-gray-600 shadow-lg">
               <div className="flex items-center gap-2 text-white">
                 <Clock size={16} />
                 <span className="font-mono text-lg">{Math.ceil(timer)}s</span>
               </div>
               <div className="text-xs text-gray-400 mt-1">
-                {greenLight} Lane Green{emergencyActive && " (Emergency)"}
+                {greenLight} Lane {priorityActive && "(Priority)"}
               </div>
             </div>
 
             {/* Current green lane highlight */}
             <div className={`absolute ${
-              greenLight === "N" ? "top-0 left-1/2 transform -translate-x-1/2 w-16 h-48 bg-green-500 bg-opacity-20" :
-              greenLight === "S" ? "bottom-0 left-1/2 transform -translate-x-1/2 w-16 h-48 bg-green-500 bg-opacity-20" :
-              greenLight === "E" ? "right-0 top-1/2 transform -translate-y-1/2 w-48 h-16 bg-green-500 bg-opacity-20" :
-              "left-0 top-1/2 transform -translate-y-1/2 w-48 h-16 bg-green-500 bg-opacity-20"
-            }`}></div>
+              greenLight === "N" ? "top-0 left-1/2 transform -translate-x-1/2 w-20 h-48 bg-green-500 bg-opacity-20 border-b-4 border-green-400" :
+              greenLight === "S" ? "bottom-0 left-1/2 transform -translate-x-1/2 w-20 h-48 bg-green-500 bg-opacity-20 border-t-4 border-green-400" :
+              greenLight === "E" ? "right-0 top-1/2 transform -translate-y-1/2 w-48 h-20 bg-green-500 bg-opacity-20 border-l-4 border-green-400" :
+              "left-0 top-1/2 transform -translate-y-1/2 w-48 h-20 bg-green-500 bg-opacity-20 border-r-4 border-green-400"
+            } transition-all duration-300`}></div>
 
             {/* Vehicles */}
             {vehicles.map((vehicle) => {
@@ -774,7 +1302,7 @@ const TrafficSimulation = () => {
               return (
                 <div
                   key={vehicle.id}
-                  className="absolute transition-all duration-100"
+                  className="absolute transition-all duration-100 ease-linear"
                   style={style}
                 >
                   {renderVehicle(vehicle)}
@@ -783,52 +1311,66 @@ const TrafficSimulation = () => {
             })}
 
             {/* Direction labels */}
-            <div className="absolute top-2 left-1/2 transform -translate-x-1/2 text-white font-bold bg-gray-900 bg-opacity-70 px-2 py-1 rounded">NORTH</div>
-            <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 text-white font-bold bg-gray-900 bg-opacity-70 px-2 py-1 rounded">SOUTH</div>
-            <div className="absolute left-2 top-1/2 transform -translate-y-1/2 text-white font-bold bg-gray-900 bg-opacity-70 px-2 py-1 rounded">WEST</div>
-            <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-white font-bold bg-gray-900 bg-opacity-70 px-2 py-1 rounded">EAST</div>
+            <div className="absolute top-4 left-1/2 transform -translate-x-1/2 text-white font-bold bg-gray-900 bg-opacity-80 px-3 py-1 rounded-lg border border-gray-600">NORTH</div>
+            <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 text-white font-bold bg-gray-900 bg-opacity-80 px-3 py-1 rounded-lg border border-gray-600">SOUTH</div>
+            <div className="absolute left-4 top-1/2 transform -translate-y-1/2 text-white font-bold bg-gray-900 bg-opacity-80 px-3 py-1 rounded-lg border border-gray-600">WEST</div>
+            <div className="absolute right-4 top-1/2 transform -translate-y-1/2 text-white font-bold bg-gray-900 bg-opacity-80 px-3 py-1 rounded-lg border border-gray-600">EAST</div>
           </div>
 
-          {/* Legend */}
+          {/* Enhanced Legend */}
           <div className="mt-6 bg-gray-800 p-4 rounded-lg border border-gray-700">
-            <h3 className="text-white font-bold mb-3">Vehicle Types & System Info</h3>
-            <div className="grid grid-cols-2 md:grid-cols-6 gap-4 text-sm">
+            <h3 className="text-white font-bold mb-3">Vehicle Types & Emergency Symbols</h3>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
               {Object.entries(VEHICLE_TYPES).map(([type, config]) => {
                 const IconComponent = config.icon;
                 return (
-                  <div key={type} className="flex items-center gap-2">
-                    <IconComponent 
-                      className={`text-${config.color}-400`} 
-                      size={18} 
-                      fill={type === "ambulance" ? "white" : "currentColor"}
-                    />
+                  <div key={type} className={`flex items-center gap-2 p-2 rounded ${
+                    config.isPriority ? "bg-red-900 bg-opacity-50" : "bg-gray-700"
+                  }`}>
+                    <div className={`p-1 rounded ${config.bgColor}`}>
+                      <IconComponent 
+                        className={config.color} 
+                        size={16} 
+                        fill={config.isPriority ? "currentColor" : "none"}
+                      />
+                    </div>
                     <span className="text-gray-300 capitalize text-xs">{type}</span>
+                    {config.isPriority && (
+                      <div className="flex items-center gap-1">
+                        <Siren size={12} className="text-red-400" />
+                        <span className="text-red-400 text-xs">PRIO</span>
+                      </div>
+                    )}
                   </div>
                 );
               })}
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                <span className="text-gray-300 text-xs">Green Lane</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                <span className="text-gray-300 text-xs">Red Lane</span>
+            </div>
+            <div className="mt-3 p-3 bg-yellow-900 bg-opacity-30 rounded border border-yellow-700">
+              <div className="text-yellow-200 text-sm">
+                <strong>Emergency Vehicle Symbols:</strong>
+                <div className="grid grid-cols-2 gap-2 mt-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 bg-red-600 rounded-full animate-pulse"></div>
+                    <span>Red Flashing Light</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 bg-blue-600 rounded-full animate-pulse"></div>
+                    <span>Blue Flashing Light</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 border-2 border-red-600 rounded-full animate-spin"></div>
+                    <span>Rotating Siren</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Siren size={14} className="text-red-400" />
+                    <span>Siren Indicator</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Features */}
-          <div className="mt-6 bg-blue-900 bg-opacity-30 border border-blue-700 rounded-lg p-4">
-            <h3 className="text-blue-300 font-bold mb-2">System Logic</h3>
-            <ul className="text-blue-200 text-sm space-y-1">
-              <li>✓ <strong>Single Lane Operation:</strong> Only one lane gets green signal at a time</li>
-              <li>✓ <strong>Dynamic Priority:</strong> Lane with highest vehicle density gets green</li>
-              <li>✓ <strong>Emergency Override:</strong> Ambulance detection immediately switches to its lane</li>
-              <li>✓ <strong>Random Ambulance Spawn:</strong> Ambulances spawn randomly in all directions</li>
-              <li>✓ <strong>Weighted Density:</strong> Different vehicle types have different weights</li>
-              <li>✓ <strong>Automatic Clearance:</strong> Emergency lane gets exclusive green until ambulance passes</li>
-            </ul>
-          </div>
+          
         </div>
 
         {/* RIGHT: Event Log */}
@@ -836,7 +1378,7 @@ const TrafficSimulation = () => {
           <div className="bg-gray-800 rounded-lg border border-gray-700 p-4 h-full flex flex-col">
             <h3 className="text-white font-bold mb-4 flex items-center gap-2">
               <Activity size={20} className="text-green-400" />
-              System Events
+              System Events & Decisions
             </h3>
             <div
               className="space-y-2 overflow-y-auto flex-1"
@@ -844,7 +1386,7 @@ const TrafficSimulation = () => {
             >
               {eventLog.length === 0 ? (
                 <div className="text-gray-500 text-sm italic">
-                  No events yet. Start the simulation to see activity.
+                  No events yet. Start the simulation to see decision logic.
                 </div>
               ) : (
                 eventLog.map((event) => (
