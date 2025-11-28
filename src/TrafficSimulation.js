@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Play,
   Pause,
@@ -7,43 +7,18 @@ import {
   Car,
   Clock,
   Activity,
+  Download,
+  Upload,
+  Bus,
+  Bike,
 } from "lucide-react";
-
-const normalGreenTime = 20;
-const emergencyGreenTime = 35;
-const MAX_LOG_ITEMS = 80;
-
-// Decide which axis should be green next
-function decideNextGreen(
-  vehicles,
-  emergencyActive,
-  emergencyDirection,
-  currentGreen
-) {
-  // 1. Emergency always has first priority
-  if (emergencyActive && emergencyDirection) {
-    if (emergencyDirection === "N" || emergencyDirection === "S") return "NS";
-    return "EW";
-  }
-
-  // 2. Otherwise, pick axis with more vehicles
-  let nsCount = 0;
-  let ewCount = 0;
-
-  vehicles.forEach((v) => {
-    if (v.direction === "N" || v.direction === "S") nsCount++;
-    else if (v.direction === "E" || v.direction === "W") ewCount++;
-  });
-
-  if (nsCount === ewCount) return currentGreen; // avoid unnecessary flicker
-  return nsCount > ewCount ? "NS" : "EW";
-}
+import * as Papa from "papaparse";
 
 const TrafficSimulation = () => {
   const [isRunning, setIsRunning] = useState(false);
   const [time, setTime] = useState(0);
-  const [greenLight, setGreenLight] = useState("NS");
-  const [timer, setTimer] = useState(normalGreenTime);
+  const [greenLight, setGreenLight] = useState("N");
+  const [timer, setTimer] = useState(20);
   const [emergencyActive, setEmergencyActive] = useState(false);
   const [emergencyDirection, setEmergencyDirection] = useState(null);
   const [vehicles, setVehicles] = useState([]);
@@ -55,14 +30,138 @@ const TrafficSimulation = () => {
   });
   const [eventLog, setEventLog] = useState([]);
   const [laneCounts, setLaneCounts] = useState({ N: 0, S: 0, E: 0, W: 0 });
-  const [ambulanceDirection, setAmbulanceDirection] = useState("N");
+  const [laneWaitTimes, setLaneWaitTimes] = useState({ N: 0, S: 0, E: 0, W: 0 });
+  const [datasetData, setDatasetData] = useState([]);
+  const [currentDataIndex, setCurrentDataIndex] = useState(0);
+  const [isDatasetLoaded, setIsDatasetLoaded] = useState(false);
 
   const animationRef = useRef(null);
   const lastTimeRef = useRef(0);
   const vehiclesRef = useRef([]);
-  const timerRef = useRef(normalGreenTime);
+  const timerRef = useRef(20);
+  
+  // FIXED: Proper traffic light sequence with timing
+  const signalCycleRef = useRef([
+    { direction: "N", duration: 20 },
+    { direction: "S", duration: 15 },
+    { direction: "E", duration: 15 },
+    { direction: "W", duration: 15 }
+  ]);
+  const currentCycleIndexRef = useRef(0);
 
-  // --- EVENT LOG HELPERS -------------------------------------------------
+  const normalGreenTime = 20;
+  const emergencyGreenTime = 35;
+  const minGreenTime = 10;
+  const maxGreenTime = 40;
+  const vehicleThreshold = 5;
+  const waitTimeThreshold = 15;
+  const MAX_LOG_ITEMS = 80;
+
+  const sampleDataset = [
+    {
+      time: "08:00:00",
+      vehicle_count: 12,
+      emergency_vehicle: false,
+      congestion_level: "medium",
+    },
+    {
+      time: "08:05:00",
+      vehicle_count: 15,
+      emergency_vehicle: false,
+      congestion_level: "high",
+    },
+    {
+      time: "08:10:00",
+      vehicle_count: 8,
+      emergency_vehicle: true,
+      congestion_level: "low",
+    },
+    {
+      time: "08:15:00",
+      vehicle_count: 20,
+      emergency_vehicle: false,
+      congestion_level: "high",
+    },
+    {
+      time: "08:20:00",
+      vehicle_count: 6,
+      emergency_vehicle: false,
+      congestion_level: "low",
+    },
+    {
+      time: "08:25:00",
+      vehicle_count: 18,
+      emergency_vehicle: true,
+      congestion_level: "high",
+    },
+    {
+      time: "08:30:00",
+      vehicle_count: 10,
+      emergency_vehicle: false,
+      congestion_level: "medium",
+    },
+    {
+      time: "08:35:00",
+      vehicle_count: 22,
+      emergency_vehicle: false,
+      congestion_level: "high",
+    },
+    {
+      time: "08:40:00",
+      vehicle_count: 7,
+      emergency_vehicle: true,
+      congestion_level: "medium",
+    },
+    {
+      time: "08:45:00",
+      vehicle_count: 14,
+      emergency_vehicle: false,
+      congestion_level: "medium",
+    },
+  ];
+
+  const loadSampleDataset = () => {
+    setDatasetData(sampleDataset);
+    setIsDatasetLoaded(true);
+    addEvent("Sample dataset loaded successfully.", "system");
+    addEvent(
+      `Loaded ${sampleDataset.length} data points with automatic emergency vehicle detection.`,
+      "system"
+    );
+  };
+
+  const handleFileUpload = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    Papa.parse(file, {
+      complete: (results) => {
+        if (results.data && results.data.length > 0) {
+          const processedData = results.data
+            .filter((row) => row && row.length >= 3)
+            .map((row, index) => ({
+              time:
+                row[0] || `08:${(index * 5).toString().padStart(2, "0")}:00`,
+              vehicle_count:
+                parseInt(row[1]) || Math.floor(Math.random() * 25) + 5,
+              emergency_vehicle:
+                Boolean(parseInt(row[2])) || Math.random() < 0.3,
+              congestion_level: ["low", "medium", "high"][
+                Math.floor(Math.random() * 3)
+              ],
+            }));
+
+          setDatasetData(processedData);
+          setIsDatasetLoaded(true);
+          addEvent(
+            `CSV dataset loaded with ${processedData.length} records.`,
+            "system"
+          );
+        }
+      },
+      header: false,
+    });
+  };
 
   const addEvent = (message, type = "info") => {
     const timestamp = new Date().toLocaleTimeString("en-IN", {
@@ -86,8 +185,6 @@ const TrafficSimulation = () => {
     });
   };
 
-  // --- TIME FORMATTER ----------------------------------------------------
-
   const formatTime = (seconds) => {
     const h = Math.floor(seconds / 3600)
       .toString()
@@ -101,22 +198,123 @@ const TrafficSimulation = () => {
     return `${h}:${m}:${s}`;
   };
 
-  // --- INITIAL VEHICLES --------------------------------------------------
+  const generateVehiclesFromDataset = useCallback(() => {
+    if (!isDatasetLoaded || datasetData.length === 0) {
+      return createInitialVehicles();
+    }
+
+    const currentData = datasetData[currentDataIndex];
+    const vehicleCount = currentData.vehicle_count;
+    const hasEmergency = currentData.emergency_vehicle;
+
+    const directions = ["N", "S", "E", "W"];
+    const vehicles = [];
+
+    for (let i = 0; i < vehicleCount; i++) {
+      const dir = directions[Math.floor(Math.random() * directions.length)];
+      const vehicleType = Math.random();
+      let vehicleIcon, vehicleSpeed;
+
+      if (vehicleType < 0.6) {
+        vehicleIcon = "car";
+        vehicleSpeed = 0.8 + Math.random() * 0.4;
+      } else if (vehicleType < 0.85) {
+        vehicleIcon = "truck";
+        vehicleSpeed = 0.6 + Math.random() * 0.3;
+      } else if (vehicleType < 0.95) {
+        vehicleIcon = "bus";
+        vehicleSpeed = 0.7 + Math.random() * 0.3;
+      } else {
+        vehicleIcon = "bike";
+        vehicleSpeed = 1.0 + Math.random() * 0.5;
+      }
+
+      vehicles.push({
+        id: `${dir}-${currentDataIndex}-${i}`,
+        direction: dir,
+        position: Math.random() * 300 + 150,
+        waiting: false,
+        waitTime: 0,
+        isEmergency: false,
+        vehicleType: vehicleIcon,
+        speed: vehicleSpeed,
+      });
+    }
+
+    if (hasEmergency) {
+      const emergencyDir =
+        directions[Math.floor(Math.random() * directions.length)];
+      vehicles.push({
+        id: `AMB-${currentDataIndex}-emergency`,
+        direction: emergencyDir,
+        position: 450,
+        waiting: false,
+        waitTime: 0,
+        isEmergency: true,
+        vehicleType: "ambulance",
+        speed: 1.5,
+      });
+
+      addEvent(
+        `🚨 Emergency vehicle detected from ${emergencyDir} direction via dataset analysis.`,
+        "emergency"
+      );
+
+      setEmergencyActive(true);
+      setEmergencyDirection(emergencyDir);
+      setGreenLight(emergencyDir);
+      timerRef.current = emergencyGreenTime;
+      setTimer(emergencyGreenTime);
+
+      setStats((prev) => ({
+        ...prev,
+        emergencyResponses: prev.emergencyResponses + 1,
+      }));
+    }
+
+    addEvent(
+      `Generated ${vehicleCount} vehicles from dataset (${
+        hasEmergency ? "with emergency vehicle" : "no emergency"
+      })`,
+      "traffic"
+    );
+
+    setCurrentDataIndex((prev) => (prev + 1) % datasetData.length);
+    return vehicles;
+  }, [isDatasetLoaded, datasetData, currentDataIndex]);
 
   const createInitialVehicles = () => {
     const initial = [];
     const directions = ["N", "S", "E", "W"];
 
     directions.forEach((dir) => {
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 3; i++) {
+        const vehicleType = Math.random();
+        let vehicleIcon, vehicleSpeed;
+
+        if (vehicleType < 0.6) {
+          vehicleIcon = "car";
+          vehicleSpeed = 1;
+        } else if (vehicleType < 0.85) {
+          vehicleIcon = "truck";
+          vehicleSpeed = 0.8;
+        } else if (vehicleType < 0.95) {
+          vehicleIcon = "bus";
+          vehicleSpeed = 0.9;
+        } else {
+          vehicleIcon = "bike";
+          vehicleSpeed = 1.2;
+        }
+
         initial.push({
           id: `${dir}-init-${i}`,
           direction: dir,
-          position: i * 90 + 80, // distance from intersection
+          position: i * 90 + 80,
           waiting: false,
           waitTime: 0,
           isEmergency: false,
-          speed: 1, // base speed
+          vehicleType: vehicleIcon,
+          speed: vehicleSpeed,
         });
       }
     });
@@ -131,61 +329,93 @@ const TrafficSimulation = () => {
       ...prev,
       totalVehicles: initialVehicles.length,
     }));
-    addEvent("Traffic simulation initialized with starter vehicles.", "system");
-    timerRef.current = normalGreenTime;
-    setTimer(normalGreenTime);
+    addEvent(
+      "Traffic simulation initialized. Load dataset for real-time data.",
+      "system"
+    );
+    
+    // FIXED: Initialize with first phase duration
+    const initialDuration = signalCycleRef.current[0].duration;
+    timerRef.current = initialDuration;
+    setTimer(initialDuration);
   }, []);
 
-  // --- AMBULANCE SPAWN ---------------------------------------------------
-
-  const spawnAmbulance = (dir) => {
-    if (emergencyActive) return;
-
-    const ambulance = {
-      id: `AMB-${Date.now()}`,
-      direction: dir,
-      position: 300, // closer so it's clearly visible
-      waiting: false,
-      waitTime: 0,
-      isEmergency: true,
-      speed: 1.2, // slightly faster than normal
-    };
-
-    setVehicles((prev) => {
-      const updated = [...prev, ambulance];
-      vehiclesRef.current = updated;
-      return updated;
-    });
-
-    setEmergencyActive(true);
-    setEmergencyDirection(dir);
-
-    // Immediately give green to ambulance axis
-    if (dir === "N" || dir === "S") {
-      setGreenLight("NS");
-      addEvent(
-        `🚨 Ambulance dispatched from ${dir} direction - NS signal override activated.`,
-        "emergency"
-      );
-    } else {
-      setGreenLight("EW");
-      addEvent(
-        `🚨 Ambulance dispatched from ${dir} direction - EW signal override activated.`,
-        "emergency"
-      );
+  const decideNextGreen = useCallback(() => {
+    if (emergencyActive && emergencyDirection) {
+      addEvent(`Emergency priority: Giving green to ${emergencyDirection} lane`, "emergency");
+      return emergencyDirection;
     }
 
-    timerRef.current = emergencyGreenTime;
-    setTimer(emergencyGreenTime);
+    const counts = { N: 0, S: 0, E: 0, W: 0 };
+    const maxWaitTimes = { N: 0, S: 0, E: 0, W: 0 };
+    
+    vehiclesRef.current.forEach((v) => {
+      counts[v.direction] = (counts[v.direction] || 0) + 1;
+      if (v.waiting && v.waitTime > maxWaitTimes[v.direction]) {
+        maxWaitTimes[v.direction] = v.waitTime;
+      }
+    });
 
-    setStats((prev) => ({
-      ...prev,
-      emergencyResponses: prev.emergencyResponses + 1,
-    }));
-  };
+    setLaneWaitTimes(maxWaitTimes);
 
-  // --- MAIN ANIMATION LOOP ----------------------------------------------
+    const criticalLanes = Object.entries(maxWaitTimes)
+      .filter(([dir, waitTime]) => waitTime > waitTimeThreshold)
+      .sort(([, a], [, b]) => b - a);
 
+    if (criticalLanes.length > 0) {
+      const [criticalDir] = criticalLanes[0];
+      addEvent(`Wait time priority: Giving extended green to ${criticalDir} lane (wait: ${maxWaitTimes[criticalDir].toFixed(1)}s)`, "signal");
+      return criticalDir;
+    }
+
+    const congestedLanes = Object.entries(counts)
+      .filter(([dir, count]) => count > vehicleThreshold)
+      .sort(([, a], [, b]) => b - a);
+
+    if (congestedLanes.length > 0) {
+      const [congestedDir] = congestedLanes[0];
+      addEvent(`Congestion priority: Giving extended green to ${congestedDir} lane (vehicles: ${counts[congestedDir]})`, "signal");
+      return congestedDir;
+    }
+
+    // FIXED: Proper cycle progression
+    currentCycleIndexRef.current = (currentCycleIndexRef.current + 1) % signalCycleRef.current.length;
+    const nextPhase = signalCycleRef.current[currentCycleIndexRef.current];
+    addEvent(`Regular cycle: Giving green to ${nextPhase.direction} lane for ${nextPhase.duration}s`, "signal");
+    return nextPhase.direction;
+  }, [emergencyActive, emergencyDirection]);
+
+  const calculateGreenTime = useCallback((direction) => {
+    if (emergencyActive && emergencyDirection === direction) {
+      return emergencyGreenTime;
+    }
+
+    const counts = laneCounts;
+    const waitTimes = laneWaitTimes;
+    
+    const vehicleCount = counts[direction] || 0;
+    const maxWaitTime = waitTimes[direction] || 0;
+
+    let calculatedTime = minGreenTime;
+
+    if (vehicleCount > vehicleThreshold) {
+      const extraVehicles = Math.min(vehicleCount - vehicleThreshold, 10);
+      calculatedTime += extraVehicles * 2;
+    }
+
+    if (maxWaitTime > waitTimeThreshold) {
+      const extraWait = Math.min(maxWaitTime - waitTimeThreshold, 20);
+      calculatedTime += extraWait * 0.5;
+    }
+
+    // FIXED: Use base duration from cycle for regular operation
+    const baseDuration = signalCycleRef.current.find(phase => phase.direction === direction)?.duration || normalGreenTime;
+    calculatedTime = Math.max(calculatedTime, baseDuration);
+
+    return Math.min(Math.max(calculatedTime, minGreenTime), maxGreenTime);
+  }, [emergencyActive, emergencyDirection, laneCounts, laneWaitTimes]);
+
+  // FIXED: Main animation loop with proper timer logic
   useEffect(() => {
     if (!isRunning) {
       if (animationRef.current) {
@@ -207,29 +437,69 @@ const TrafficSimulation = () => {
       // Update global time
       setTime((prev) => prev + safeDelta);
 
-      // --- VEHICLE UPDATE ------------------------------------------------
+      // FIXED: Proper timer decrement
+      if (timerRef.current > 0) {
+        timerRef.current -= safeDelta;
+        setTimer(Math.ceil(timerRef.current));
+      }
+
+      // FIXED: Check for signal change only when timer reaches zero
+      if (timerRef.current <= 0) {
+        const newLight = decideNextGreen();
+        const greenTime = calculateGreenTime(newLight);
+        
+        // Reset timer with new time
+        timerRef.current = greenTime;
+        setTimer(Math.ceil(greenTime));
+        
+        // Update green light state
+        setGreenLight(newLight);
+
+        const directionNames = {
+          N: "North",
+          S: "South", 
+          E: "East",
+          W: "West"
+        };
+
+        addEvent(
+          `Signal changed to ${directionNames[newLight]} GREEN for ${Math.ceil(greenTime)}s.`,
+          "signal"
+        );
+
+        if (isDatasetLoaded) {
+          const newVehicles = generateVehiclesFromDataset();
+          setVehicles((prev) => {
+            const updated = [...prev, ...newVehicles];
+            vehiclesRef.current = updated;
+            return updated;
+          });
+
+          setStats((prev) => ({
+            ...prev,
+            totalVehicles: prev.totalVehicles + newVehicles.length,
+          }));
+        }
+      }
+
+      // Update vehicles
       setVehicles((prevVehicles) => {
         const updated = prevVehicles
           .map((vehicle) => {
-            const axisIsNS =
-              vehicle.direction === "N" || vehicle.direction === "S";
-            const canMoveOnAxis = greenLight === (axisIsNS ? "NS" : "EW");
+            const canMove = vehicle.direction === greenLight;
 
             let waiting = vehicle.waiting;
             let waitTime = vehicle.waitTime;
             let position = vehicle.position;
 
-            // If red → entire lane waits (no movement)
-            if (!canMoveOnAxis) {
+            if (!canMove) {
               waiting = true;
               waitTime += safeDelta;
             } else {
               waiting = false;
-              // Slower movement for better visibility
               position = position - vehicle.speed * 0.6;
             }
 
-            // remove vehicles that left the scene
             if (position < -80) {
               return null;
             }
@@ -243,34 +513,73 @@ const TrafficSimulation = () => {
           })
           .filter(Boolean);
 
-        // Lane-wise counts
         const counts = { N: 0, S: 0, E: 0, W: 0 };
+        const maxWaitTimes = { N: 0, S: 0, E: 0, W: 0 };
+        
         updated.forEach((v) => {
           counts[v.direction] = (counts[v.direction] || 0) + 1;
+          if (v.waiting && v.waitTime > maxWaitTimes[v.direction]) {
+            maxWaitTimes[v.direction] = v.waitTime;
+          }
         });
+        
         setLaneCounts(counts);
+        setLaneWaitTimes(maxWaitTimes);
 
-        // Spawn normal vehicles occasionally (light random rate)
-        if (Math.random() < 0.012) {
+        if (!isDatasetLoaded && Math.random() < 0.008) {
           const directions = ["N", "S", "E", "W"];
           const dir = directions[Math.floor(Math.random() * directions.length)];
-          updated.push({
+          const isEmergency = Math.random() < 0.05;
+
+          const vehicleType = Math.random();
+          let vehicleIcon, vehicleSpeed;
+
+          if (vehicleType < 0.6) {
+            vehicleIcon = "car";
+            vehicleSpeed = 1;
+          } else if (vehicleType < 0.85) {
+            vehicleIcon = "truck";
+            vehicleSpeed = 0.8;
+          } else if (vehicleType < 0.95) {
+            vehicleIcon = "bus";
+            vehicleSpeed = 0.9;
+          } else {
+            vehicleIcon = "bike";
+            vehicleSpeed = 1.2;
+          }
+
+          const newVehicle = {
             id: `${dir}-${Date.now()}`,
             direction: dir,
-            position: 300,
+            position: 450,
             waiting: false,
             waitTime: 0,
-            isEmergency: false,
-            speed: 1,
-          });
+            isEmergency,
+            vehicleType: isEmergency ? "ambulance" : vehicleIcon,
+            speed: isEmergency ? 1.2 : vehicleSpeed,
+          };
+
+          updated.push(newVehicle);
+
+          if (isEmergency) {
+            addEvent(
+              `🚨 Random emergency vehicle spawned from ${dir} direction.`,
+              "emergency"
+            );
+            setEmergencyActive(true);
+            setEmergencyDirection(dir);
+            setStats((prev) => ({
+              ...prev,
+              emergencyResponses: prev.emergencyResponses + 1,
+            }));
+          }
+
           setStats((prev) => ({
             ...prev,
             totalVehicles: prev.totalVehicles + 1,
           }));
-          addEvent(`New vehicle entered from ${dir} direction.`, "traffic");
         }
 
-        // Check emergency status
         const emergencyVehicles = updated.filter((v) => v.isEmergency);
         if (emergencyActive && emergencyVehicles.length === 0) {
           setEmergencyActive(false);
@@ -281,7 +590,6 @@ const TrafficSimulation = () => {
           );
         }
 
-        // Update average wait time
         const waitingVehicles = updated.filter((v) => v.waiting);
         if (waitingVehicles.length > 0) {
           const avgWait =
@@ -302,32 +610,6 @@ const TrafficSimulation = () => {
         return updated;
       });
 
-      // --- TIMER + SIGNAL UPDATE ----------------------------------------
-      timerRef.current -= safeDelta;
-      if (timerRef.current <= 0) {
-        const nextLight = decideNextGreen(
-          vehiclesRef.current,
-          emergencyActive,
-          emergencyDirection,
-          greenLight
-        );
-
-        if (nextLight !== greenLight) {
-          setGreenLight(nextLight);
-          addEvent(
-            `Signal changed to ${
-              nextLight === "NS" ? "North-South GREEN" : "East-West GREEN"
-            }.`,
-            "signal"
-          );
-        }
-
-        timerRef.current = emergencyActive
-          ? emergencyGreenTime
-          : normalGreenTime;
-      }
-      setTimer(timerRef.current);
-
       animationRef.current = requestAnimationFrame(animate);
     };
 
@@ -339,9 +621,15 @@ const TrafficSimulation = () => {
       }
       lastTimeRef.current = 0;
     };
-  }, [isRunning, greenLight, emergencyActive, emergencyDirection]);
-
-  // --- RESET -------------------------------------------------------------
+  }, [
+    isRunning,
+    greenLight,
+    emergencyActive,
+    decideNextGreen,
+    calculateGreenTime,
+    isDatasetLoaded,
+    generateVehiclesFromDataset,
+  ]);
 
   const reset = () => {
     if (animationRef.current) {
@@ -350,11 +638,17 @@ const TrafficSimulation = () => {
 
     setIsRunning(false);
     setTime(0);
-    timerRef.current = normalGreenTime;
-    setTimer(normalGreenTime);
-    setGreenLight("NS");
+    
+    // FIXED: Reset to first phase with proper duration
+    currentCycleIndexRef.current = 0;
+    const initialDuration = signalCycleRef.current[0].duration;
+    timerRef.current = initialDuration;
+    setTimer(initialDuration);
+    
+    setGreenLight("N");
     setEmergencyActive(false);
     setEmergencyDirection(null);
+    setCurrentDataIndex(0);
     lastTimeRef.current = 0;
 
     const initialVehicles = createInitialVehicles();
@@ -368,39 +662,38 @@ const TrafficSimulation = () => {
     });
 
     setEventLog([]);
+    setLaneWaitTimes({ N: 0, S: 0, E: 0, W: 0 });
     addEvent("System reset. All parameters restored to default.", "system");
     setLaneCounts({ N: 0, S: 0, E: 0, W: 0 });
   };
 
-  // --- VEHICLE POSITIONING (ALIGNED TO ROADS) ----------------------------
-
   const getVehicleStyle = (vehicle) => {
     const d = vehicle.position;
-    const laneOffset = 20; // move cars slightly off the divider
+    const laneOffset = 30;
 
     switch (vehicle.direction) {
-      case "N": // coming from top
+      case "N":
         return {
           left: `calc(50% - ${laneOffset}px)`,
           top: `calc(50% - ${d}px)`,
           transform: "translate(-50%, -50%) rotate(0deg)",
         };
-      case "S": // coming from bottom
+      case "S":
         return {
           left: `calc(50% + ${laneOffset}px)`,
           top: `calc(50% + ${d}px)`,
           transform: "translate(-50%, -50%) rotate(180deg)",
         };
-      case "E": // coming from right
+      case "E":
         return {
-          left: `calc(50% + ${d}px)`,
           top: `calc(50% + ${laneOffset}px)`,
+          left: `calc(50% + ${d}px)`,
           transform: "translate(-50%, -50%) rotate(90deg)",
         };
-      case "W": // coming from left
+      case "W":
         return {
-          left: `calc(50% - ${d}px)`,
           top: `calc(50% - ${laneOffset}px)`,
+          left: `calc(50% - ${d}px)`,
           transform: "translate(-50%, -50%) rotate(270deg)",
         };
       default:
@@ -412,24 +705,54 @@ const TrafficSimulation = () => {
     }
   };
 
-  // --- JSX (UI stays the same) ------------------------------------------
+  const renderVehicleIcon = (vehicle) => {
+    const baseProps = {
+      size: 24,
+      className: vehicle.waiting
+        ? "text-purple-400"
+        : vehicle.isEmergency
+        ? "text-red-500 animate-pulse"
+        : "text-blue-400",
+    };
+
+    switch (vehicle.vehicleType) {
+      case "car":
+        return <Car {...baseProps} />;
+      case "truck":
+        return <Truck {...baseProps} />;
+      case "bus":
+        return <Bus {...baseProps} />;
+      case "bike":
+        return (
+          <Bike {...baseProps} className={`${baseProps.className}`} size={20} />
+        );
+      case "ambulance":
+        return (
+          <Truck
+            {...baseProps}
+            className="text-red-500 animate-pulse"
+            fill="white"
+          />
+        );
+      default:
+        return <Car {...baseProps} />;
+    }
+  };
 
   return (
     <div className="w-full max-w-7xl mx-auto p-6 bg-gradient-to-br from-gray-900 to-gray-800 rounded-xl shadow-2xl">
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-white mb-2 flex items-center gap-2">
           <Activity className="text-green-400" />
-          Smart Traffic Management System
+          AI Traffic Management System
         </h1>
         <p className="text-gray-300">
-          Dynamic Signal Control with Emergency Vehicle Priority
+          Dynamic Traffic Control with Emergency Vehicle Priority
         </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* LEFT: Controls + Simulation */}
         <div className="lg:col-span-2">
-          {/* Controls */}
           <div className="flex gap-3 mb-6 flex-wrap items-center">
             <button
               onClick={() => {
@@ -455,31 +778,51 @@ const TrafficSimulation = () => {
               Reset
             </button>
 
-            {/* Ambulance lane selector */}
             <div className="flex items-center gap-2 bg-gray-800 px-3 py-2 rounded-lg border border-gray-700">
-              <span className="text-gray-300 text-sm">Ambulance from:</span>
-              <select
-                value={ambulanceDirection}
-                onChange={(e) => setAmbulanceDirection(e.target.value)}
-                className="bg-gray-900 text-gray-100 text-sm rounded-md px-2 py-1 border border-gray-700 focus:outline-none"
-              >
-                <option value="N">North</option>
-                <option value="S">South</option>
-                <option value="E">East</option>
-                <option value="W">West</option>
-              </select>
+              <span className="text-gray-300 text-sm">Dataset:</span>
               <button
-                onClick={() => spawnAmbulance(ambulanceDirection)}
-                disabled={emergencyActive}
-                className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition-all text-sm"
+                onClick={loadSampleDataset}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold transition-all text-sm"
               >
-                <Truck size={18} />
-                Dispatch Ambulance
+                <Download size={16} />
+                Load Sample Data
               </button>
+              <label className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-semibold transition-all text-sm cursor-pointer">
+                <Upload size={16} />
+                Upload CSV
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+              </label>
             </div>
           </div>
 
-          {/* Stats */}
+          {isDatasetLoaded && (
+            <div className="bg-blue-900 bg-opacity-30 border border-blue-700 rounded-lg p-4 mb-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-blue-300 font-bold">Dataset Active</div>
+                  <div className="text-blue-200 text-sm">
+                    {datasetData.length} data points loaded | Current index:{" "}
+                    {currentDataIndex} | Next:{" "}
+                    {datasetData[currentDataIndex]?.vehicle_count} vehicles
+                    {datasetData[currentDataIndex]?.emergency_vehicle
+                      ? " (with emergency)"
+                      : ""}
+                  </div>
+                </div>
+                <div className="text-blue-300 text-sm">
+                  {datasetData[
+                    currentDataIndex
+                  ]?.congestion_level?.toUpperCase()} Congestion
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-3">
             <div className="bg-gray-800 p-4 rounded-lg border border-gray-700">
               <div className="text-gray-400 text-sm mb-1">Simulation Time</div>
@@ -509,12 +852,13 @@ const TrafficSimulation = () => {
             </div>
           </div>
 
-          {/* Lane counts */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
             {["N", "S", "E", "W"].map((dir) => {
-              const isGreen =
-                (greenLight === "NS" && (dir === "N" || dir === "S")) ||
-                (greenLight === "EW" && (dir === "E" || dir === "W"));
+              const isGreen = greenLight === dir;
+              const vehicleCount = laneCounts[dir] || 0;
+              const waitTime = laneWaitTimes[dir] || 0;
+              const isCongested = vehicleCount > vehicleThreshold;
+              const isWaitingCritical = waitTime > waitTimeThreshold;
 
               return (
                 <div
@@ -522,6 +866,10 @@ const TrafficSimulation = () => {
                   className={`p-3 rounded-lg border text-center transition-all duration-300 ${
                     isGreen
                       ? "bg-green-900 border-green-500 shadow-lg scale-105"
+                      : isWaitingCritical
+                      ? "bg-orange-900 border-orange-500"
+                      : isCongested
+                      ? "bg-yellow-900 border-yellow-500"
                       : "bg-gray-800 border-gray-700"
                   }`}
                 >
@@ -535,19 +883,31 @@ const TrafficSimulation = () => {
                       : "West Lane"}
                   </div>
                   <div
-                    className={`text-xl font-bold ${
-                      isGreen ? "text-green-300" : "text-white"
+                    className={`text-2xl font-bold ${
+                      isGreen 
+                        ? "text-green-300" 
+                        : isWaitingCritical
+                        ? "text-orange-300"
+                        : isCongested
+                        ? "text-yellow-300"
+                        : "text-white"
                     }`}
                   >
-                    {laneCounts[dir] || 0}
+                    {vehicleCount}
                   </div>
-                  <div className="text-gray-500 text-xs">vehicles</div>
+                  <div className="text-gray-500 text-xs">
+                    Max wait: {waitTime.toFixed(1)}s
+                  </div>
+                  <div className="text-xs mt-1">
+                    {isWaitingCritical && "⏰ Priority"}
+                    {isCongested && !isWaitingCritical && "🚗 Congested"}
+                    {!isCongested && !isWaitingCritical && "Normal"}
+                  </div>
                 </div>
               );
             })}
           </div>
 
-          {/* Emergency banner */}
           {emergencyActive && (
             <div className="bg-red-900 border-2 border-red-500 rounded-lg p-4 mb-6 animate-pulse">
               <div className="flex items-center gap-3">
@@ -565,117 +925,85 @@ const TrafficSimulation = () => {
             </div>
           )}
 
-          {/* Intersection visualization */}
+          {/* Debug Info */}
+          <div className="bg-gray-800 p-3 rounded-lg mb-4 border border-yellow-500">
+            <div className="text-yellow-300 text-sm font-mono">
+              Timer: {Math.ceil(timer)}s | Green Light: {greenLight} | Running: {isRunning.toString()}
+            </div>
+          </div>
+
           <div
             className="relative bg-gray-700 rounded-lg p-8 overflow-hidden mx-auto"
             style={{ height: "600px", width: "600px" }}
           >
-            {/* Vertical road */}
-            <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-20 h-full bg-gray-600">
+            <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-20 h-full bg-black">
               <div className="absolute left-1/2 transform -translate-x-1/2 w-0.5 h-full border-l-2 border-dashed border-yellow-300"></div>
             </div>
-
-            {/* Horizontal road */}
-            <div className="absolute left-0 top-1/2 transform -translate-y-1/2 w-full h-20 bg-gray-600">
+            <div className="absolute left-0 top-1/2 transform -translate-y-1/2 w-full h-20 bg-black">
               <div className="absolute top-1/2 transform -translate-y-1/2 w-full h-0.5 border-t-2 border-dashed border-yellow-300"></div>
             </div>
-
-            {/* Center box */}
             <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-20 h-20 bg-gray-500 border-4 border-yellow-400"></div>
-
-            {/* NS signals */}
-            <div className="absolute top-32 left-1/2 transform -translate-x-1/2 flex flex-col gap-1 bg-gray-900 p-2 rounded">
-              <div
-                className={`w-4 h-4 rounded-full ${
-                  greenLight === "NS" ? "bg-green-500" : "bg-gray-700"
-                }`}
-              ></div>
-              <div
-                className={`w-4 h-4 rounded-full ${
-                  greenLight === "NS" ? "bg-gray-700" : "bg-red-500"
-                }`}
-              ></div>
-            </div>
-            <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2 flex flex-col gap-1 bg-gray-900 p-2 rounded">
-              <div
-                className={`w-4 h-4 rounded-full ${
-                  greenLight === "NS" ? "bg-green-500" : "bg-gray-700"
-                }`}
-              ></div>
-              <div
-                className={`w-4 h-4 rounded-full ${
-                  greenLight === "NS" ? "bg-gray-700" : "bg-red-500"
-                }`}
-              ></div>
-            </div>
-
-            {/* EW signals */}
-            <div className="absolute right-32 top-1/2 transform -translate-y-1/2 flex gap-1 bg-gray-900 p-2 rounded">
-              <div
-                className={`w-4 h-4 rounded-full ${
-                  greenLight === "EW" ? "bg-green-500" : "bg-gray-700"
-                }`}
-              ></div>
-              <div
-                className={`w-4 h-4 rounded-full ${
-                  greenLight === "EW" ? "bg-gray-700" : "bg-red-500"
-                }`}
-              ></div>
-            </div>
-            <div className="absolute left-32 top-1/2 transform -translate-y-1/2 flex gap-1 bg-gray-900 p-2 rounded">
-              <div
-                className={`w-4 h-4 rounded-full ${
-                  greenLight === "EW" ? "bg-green-500" : "bg-gray-700"
-                }`}
-              ></div>
-              <div
-                className={`w-4 h-4 rounded-full ${
-                  greenLight === "EW" ? "bg-gray-700" : "bg-red-500"
-                }`}
-              ></div>
-            </div>
-
-            {/* Timer display */}
+    
+            {["N", "S", "E", "W"].map((dir) => {
+              const isGreen = greenLight === dir;
+              return (
+                <div
+                  key={dir}
+                  className={`absolute ${
+                    dir === "N"
+                      ? "top-[15%] left-1/2 transform -translate-x-1/2 flex-col"
+                      : dir === "S"
+                      ? "bottom-[15%] left-1/2 transform -translate-x-1/2 flex-col"
+                      : dir === "W"
+                      ? "top-1/2 left-[15%] transform -translate-y-1/2 flex-row"
+                      : "top-1/2 right-[15%] transform -translate-y-1/2 flex-row"
+                  } flex gap-1 bg-gray-900 p-2 rounded shadow-lg border-2 ${
+                    isGreen ? "border-green-500" : "border-gray-600"
+                  } z-10 transition-all duration-300`}
+                >
+                  <div
+                    className={`w-6 h-6 rounded-full transition-all duration-300 ${
+                      isGreen 
+                        ? "bg-green-500 shadow-lg shadow-green-500/50" 
+                        : "bg-gray-700"
+                    }`}
+                  ></div>
+                  <div
+                    className={`w-6 h-6 rounded-full transition-all duration-300 ${
+                      isGreen 
+                        ? "bg-gray-700" 
+                        : "bg-red-500 shadow-lg shadow-red-500/50"
+                    }`}
+                  ></div>
+                </div>
+              );
+            })}
+            
             <div className="absolute top-4 left-4 bg-gray-900 px-4 py-2 rounded-lg border border-gray-600">
               <div className="flex items-center gap-2 text-white">
                 <Clock size={16} />
                 <span className="font-mono text-lg">{Math.ceil(timer)}s</span>
               </div>
               <div className="text-xs text-gray-400 mt-1">
-                {greenLight === "NS" ? "N-S Green" : "E-W Green"}
+                {greenLight === "N" ? "🟢 North Green" : 
+                 greenLight === "S" ? "🟢 South Green" :
+                 greenLight === "E" ? "🟢 East Green" : "🟢 West Green"}
               </div>
             </div>
-
-            {/* Vehicles */}
+            
             {vehicles.map((vehicle) => {
               const style = getVehicleStyle(vehicle);
               return (
                 <div
                   key={vehicle.id}
-                  className="absolute car-animation transition-all duration-100"
+                  className="absolute transition-all duration-100"
                   style={style}
                 >
-                  {vehicle.isEmergency ? (
-                    <Truck
-                      className="text-red-500 animate-pulse drop-shadow-[0_0_12px_rgba(239,68,68,0.8)]"
-                      size={36}
-                      fill="white"
-                    />
-                  ) : (
-                    <Car
-                      className={`${
-                        vehicle.waiting
-                          ? "text-purple-400 drop-shadow-[0_0_8px_rgba(168,85,247,0.7)]"
-                          : "text-blue-400 drop-shadow-[0_0_8px_rgba(96,165,250,0.7)]"
-                      }`}
-                      size={30}
-                    />
-                  )}
+                  {renderVehicleIcon(vehicle)}
                 </div>
               );
             })}
-
-            {/* Direction labels */}
+            
             <div className="absolute top-2 left-1/2 transform -translate-x-1/2 text-white font-bold">
               NORTH
             </div>
@@ -690,13 +1018,50 @@ const TrafficSimulation = () => {
             </div>
           </div>
 
-          {/* Legend */}
+          <div className="mt-6 bg-green-900 bg-opacity-30 border border-green-700 rounded-lg p-4">
+            <h3 className="text-green-300 font-bold mb-2">Dynamic Control System</h3>
+            <div className="text-green-200 text-sm space-y-2">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="font-semibold">Priority Levels:</div>
+                  <ul className="text-xs space-y-1 mt-1">
+                    <li>1. 🚨 Emergency Vehicles (35s)</li>
+                    <li>2. ⏰ Long Wait Times ({waitTimeThreshold}+s)</li>
+                    <li>3. 🚗 High Traffic ({vehicleThreshold}+ vehicles)</li>
+                    <li>4. 🔄 Regular Cycle (10-40s)</li>
+                  </ul>
+                </div>
+                <div>
+                  <div className="font-semibold">Time Ranges:</div>
+                  <ul className="text-xs space-y-1 mt-1">
+                    <li>Minimum: {minGreenTime}s (empty lanes)</li>
+                    <li>Normal: {normalGreenTime}s (balanced)</li>
+                    <li>Maximum: {maxGreenTime}s (congested)</li>
+                    <li>Emergency: {emergencyGreenTime}s (priority)</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div className="mt-6 bg-gray-800 p-4 rounded-lg border border-gray-700">
             <h3 className="text-white font-bold mb-3">Legend</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div className="flex items-center gap-2">
                 <Car className="text-blue-400" size={20} />
-                <span className="text-gray-300">Normal Vehicle</span>
+                <span className="text-gray-300">Car</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Truck className="text-blue-400" size={20} />
+                <span className="text-gray-300">Truck</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Bus className="text-blue-400" size={20} />
+                <span className="text-gray-300">Bus</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Bike className="text-blue-400" size={20} />
+                <span className="text-gray-300">Bike</span>
               </div>
               <div className="flex items-center gap-2">
                 <Car className="text-purple-400" size={20} />
@@ -710,23 +1075,14 @@ const TrafficSimulation = () => {
                 <div className="w-4 h-4 bg-green-500 rounded-full"></div>
                 <span className="text-gray-300">Green Signal</span>
               </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 bg-red-500 rounded-full"></div>
+                <span className="text-gray-300">Red Signal</span>
+              </div>
             </div>
-          </div>
-
-          {/* Features */}
-          <div className="mt-6 bg-blue-900 bg-opacity-30 border border-blue-700 rounded-lg p-4">
-            <h3 className="text-blue-300 font-bold mb-2">System Features</h3>
-            <ul className="text-blue-200 text-sm space-y-1">
-              <li>✓ Dynamic traffic light timing based on vehicle density</li>
-              <li>✓ Emergency vehicle priority with signal override</li>
-              <li>✓ Real-time monitoring of wait times and congestion</li>
-              <li>✓ Automatic priority lane clearance for ambulances</li>
-              <li>✓ Adaptive signal timing (20s normal / 35s emergency)</li>
-            </ul>
           </div>
         </div>
 
-        {/* RIGHT: Event Log */}
         <div className="lg:col-span-1">
           <div className="bg-gray-800 rounded-lg border border-gray-700 p-4 h-full flex flex-col">
             <h3 className="text-white font-bold mb-4 flex items-center gap-2">
