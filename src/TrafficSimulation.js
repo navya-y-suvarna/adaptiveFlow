@@ -1104,7 +1104,7 @@ const TrafficSimulation = () => {
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-white mb-2 flex items-center gap-2">
           <Activity className="text-green-400" />
-          Smart Traffic Solution - AI Powered Management
+          Smart Traffic Solution 
         </h1>
         <p className="text-gray-300">
           Priority vehicle detection with AI-optimized signal control using historical data
@@ -1153,12 +1153,6 @@ const TrafficSimulation = () => {
 
           {/* Stats */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-3">
-            <div className="bg-gray-800 p-4 rounded-lg border border-gray-700">
-              <div className="text-gray-400 text-sm mb-1">Simulation Time</div>
-              <div className="text-2xl font-bold text-white font-mono">
-                {formatTime(time)}
-              </div>
-            </div>
             <div className="bg-gray-800 p-4 rounded-lg border border-gray-700">
               <div className="text-gray-400 text-sm mb-1">Total Vehicles</div>
               <div className="text-2xl font-bold text-white">
